@@ -194,6 +194,11 @@ export function apply(ctx: HostContext, config?: Config): void {
                 rolesAvailable: roles.available,
                 // M1 只有模式 A：向量检索恒为关闭状态。
                 embedding: { enabled: current.embedding.enabled, status: 'idle' },
+                diagnostics: {
+                  knownToolCount: enforcement.universe.size,
+                  schemaCount: enforcement.schemasOf().size,
+                  agents: enforcement.diagnostics(),
+                },
               })
             },
             writeConfig: patch => writeConfig(store, patch),

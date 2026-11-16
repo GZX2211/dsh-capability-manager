@@ -82,6 +82,21 @@ export class EnforcementRegistry {
   }
 
   /**
+   * 每个已绑定 agent 的可见集概况。
+   *
+   * 用来区分「这个会话没被绑定」与「绑定了但名单本来就有这么多」——
+   * 两者在界面上看不出区别，排查时只能靠这份数据。
+   */
+  diagnostics(): Array<{ id: string; presentCount: number; allowCount: number; restricted: boolean }> {
+    return [...this.bindings.values()].map(binding => ({
+      id: binding.agent.id,
+      presentCount: binding.present.size,
+      allowCount: binding.applied.length,
+      restricted: binding.release !== undefined,
+    }))
+  }
+
+  /**
    * 记录本插件自己注册的工具。
    *
    * 注册方自己知道名字与 schema，不必等下一次吸收——`meta_search` 自己也要能被召回。

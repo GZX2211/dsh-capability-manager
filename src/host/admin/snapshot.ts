@@ -63,6 +63,7 @@ export interface SnapshotInput {
   config: CapabilityConfig
   rolesAvailable: boolean
   embedding: EmbeddingStatus
+  diagnostics?: SnapshotResponse['diagnostics']
 }
 
 /**
@@ -79,5 +80,6 @@ export function buildSnapshot(input: SnapshotInput): SnapshotResponse {
     rolesAvailable: input.rolesAvailable,
     embedding: input.embedding,
     warnings: computeWarnings(input.config, input.capabilities),
+    ...input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics },
   }
 }

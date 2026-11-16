@@ -85,6 +85,17 @@ export interface SnapshotResponse {
   rolesAvailable: boolean
   embedding: EmbeddingStatus
   warnings: SnapshotWarning[]
+  /**
+   * 运行期诊断：每个受限 agent 看到了什么。
+   *
+   * 排查「插件看起来已启用、但某个会话没被收紧」时，这是唯一能区分
+   * 「没有绑定」「绑定了但名单很大」的地方。
+   */
+  diagnostics?: {
+    knownToolCount: number
+    schemaCount: number
+    agents: Array<{ id: string; presentCount: number; allowCount: number; restricted: boolean }>
+  }
 }
 
 /**
