@@ -1,45 +1,31 @@
 // src/host/search/seen.ts
 //
-// 从会话日志读出「已经以完整 schema 出现过」的工具。
+// 「哪些工具此刻已经以完整 schema 在上下文里」——召回去重与索引注入共用这一份事实。
 //
-// 两个用途共用同一份事实，因此放在一起：
-//   · 召回去重的比较基准（载荷）
-//   · 索引注入的排除依据（名称）
-//
-// 日志读不出来时返回空集：这只会让去重与索引多给一些内容，不会让会话失败。
+// 判定基准必须是**当前可见**的工具集，不能是会话历史。
+// 曾经用 `Session.toolHistory()` 的历史全集：那里面记录着工具被收走之前出现过的全部
+// 定义，于是限制生效后每一次召回都被自己判成「已经在上下文里」而剔除，
+// 模型既看不到工具、又召不回来——会话被自己的去重逻辑锁死。
 
-import type { SessionLike } from '../enforcement/recalled.ts'
+import type { ToolSource } from '../catalog/collect.ts'
 import { toolPayload, type ToolPayloadSource } from './payload.ts'
 
-/** 会话日志里出现过的全部工具 schema，两次读取口径一致。 */
-function historyTools(session: SessionLike): ToolPayloadSource[] {
-  let history: { tools: readonly ToolPayloadSource[]; updates: readonly { additions: readonly ToolPayloadSource[] }[] }
-  try {
-    history = session.toolHistory()
-  } catch {
-    return []
-  }
-  const tools: ToolPayloadSource[] = [...history.tools]
-  for (const update of history.updates) tools.push(...update.additions)
-  return tools
-}
-
 /**
- * 已经以完整 schema 出现过的工具载荷。
+ * 当前可见工具的载荷，用作召回去重的比较基准。
  *
- * @param session - 会话。
+ * @param tools - 该 agent 此刻可见的工具。
  * @returns 载荷字符串集合。
  */
-export function seenToolPayloads(session: SessionLike): ReadonlySet<string> {
-  return new Set(historyTools(session).map(toolPayload))
+export function toolPayloadsOf(tools: readonly ToolPayloadSource[]): ReadonlySet<string> {
+  return new Set(tools.map(toolPayload))
 }
 
 /**
- * 已经以完整 schema 出现过的工具名。
+ * 当前可见工具的名称，用作索引注入的排除依据。
  *
- * @param session - 会话。
+ * @param tools - 该 agent 此刻可见的工具。
  * @returns 工具名集合。
  */
-export function appearedToolNames(session: SessionLike): ReadonlySet<string> {
-  return new Set(historyTools(session).map(tool => tool.name))
+export function toolNamesOf(tools: readonly ToolSource[]): ReadonlySet<string> {
+  return new Set(tools.map(tool => tool.name))
 }

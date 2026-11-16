@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { API_PREFIX, ERROR_CODES, type ConfigWriteResponse, type ErrorResponse } from '../shared/api.ts'
 import type { CapabilityEntry } from '../shared/capability.ts'
+import type { ToolSource } from './catalog/collect.ts'
 import { toolId } from '../shared/capability.ts'
 import type { CapabilityConfig } from '../shared/config.ts'
 import { applyPatch } from './admin/mutate.ts'
@@ -23,7 +24,7 @@ import { EnforcementRegistry, type AgentScope } from './enforcement/registry.ts'
 import { RecalledStore } from './enforcement/recalled.ts'
 import { renderIndex, selectToolIndex, shouldInjectIndex } from './prompt/index-section.ts'
 import { createRoleResolver, type RoleResolver } from './roles/resolve.ts'
-import { appearedToolNames, seenToolPayloads } from './search/seen.ts'
+import { toolNamesOf, toolPayloadsOf } from './search/seen.ts'
 import { resolveStateDirectory } from './state/directory.ts'
 import {
   createMetaSearchTool,
@@ -80,7 +81,7 @@ export function apply(ctx: HostContext, config?: Config): void {
         role: roles.roleOf(sessionId),
       })
     },
-    seen: session => seenToolPayloads(session),
+    seen: agent => toolPayloadsOf(visibleToolsOf(agent, log)),
     record: (sessionId, outcome) => {
       recalled.add(sessionId, outcome.names)
       // 立即重建：下一个 step 的 resolve() 会重新读 view，agent-loop 自动追加 tool-addition。
@@ -114,7 +115,7 @@ export function apply(ctx: HostContext, config?: Config): void {
               tools: summariesOf(collectCapabilities(enforcement, current)),
               config: current,
               role: roles.roleOf(agent.id),
-              appeared: appearedToolNames(agent.session),
+              appeared: toolNamesOf(visibleToolsOf(agent, log)),
             })
             return renderIndex({ tools, skills: [] })
           },
@@ -243,6 +244,22 @@ function collectCapabilities(enforcement: EnforcementRegistry, config: Capabilit
   })
 }
 
+/**
+ * 该 agent 此刻真正能看到的工具。
+ *
+ * 召回的去重基准与索引的排除依据都必须是这一份，而不是会话历史：
+ * 历史里记着工具被收走之前的定义，拿它当基准会让召回永远返回空。
+ */
+function visibleToolsOf(agent: unknown, log: (message: string) => void): readonly ToolSource[] {
+  const scope = agentScopeOf(agent)
+  try {
+    return scope.ctx.tools.definitions(scope)
+  } catch (error) {
+    log(`cannot read the visible tool set: ${describe(error)}`)
+    return []
+  }
+}
+
 /** 索引只放名称与摘要，与列表共用同一份摘要。 */
 function summariesOf(capabilities: readonly CapabilityEntry[]): Map<string, string> {
   return new Map(capabilities.filter(entry => entry.kind === 'tool').map(entry => [entry.name, entry.summary]))
@@ -308,3 +325,4 @@ function readPackageVersion(): string {
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
+

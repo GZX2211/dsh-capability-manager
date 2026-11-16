@@ -7,7 +7,6 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { MetaSearchRequest } from '../../search/index.ts'
 import { runMetaSearch } from '../../search/index.ts'
 import type { ToolPayloadSource } from '../../search/payload.ts'
-import type { SessionLike } from '../../enforcement/recalled.ts'
 
 export const META_SEARCH_TOOL_NAME = 'meta_search'
 
@@ -57,8 +56,13 @@ interface MetaSearchValue {
 export interface MetaSearchDependencies {
   /** 该 agent 此刻可召回的工具：已按池、黑名单与存在性过滤。 */
   candidates: (agent: unknown) => ReadonlyMap<string, ToolPayloadSource>
-  /** 本会话已经出现过的工具载荷。 */
-  seen: (session: SessionLike) => ReadonlySet<string>
+  /**
+   * 该 agent 此刻**已经能在上下文里看到**的工具载荷。
+   *
+   * 必须是当前可见集，不是会话历史：历史里记着工具被收走之前的定义，
+   * 用它当基准会让每一次召回都被判成「已经出现过」而剔除。
+   */
+  seen: (agent: unknown) => ReadonlySet<string>
   /** 记录本次召回并重建可见集；只在真的返回了工具时调用。 */
   record: (sessionId: string, outcome: { names: string[]; payloads: string[] }) => void
 }
@@ -146,14 +150,14 @@ export function createMetaSearchTool(deps: MetaSearchDependencies): ToolDefiniti
       render: renderMetaSearch,
     },
     async execute(rawArgs: unknown, exec: unknown): Promise<unknown> {
-      const context = exec as { agent?: { session: SessionLike } }
+      const context = exec as { agent?: { session: { id: string } } }
       const agent = context.agent
       if (agent === undefined) {
         throw new Error('meta_search 只能在会话内调用：当前没有发起调用的 agent')
       }
       const session = agent.session
       const outcome = runMetaSearch(
-        { candidates: deps.candidates(agent), seen: deps.seen(session) },
+        { candidates: deps.candidates(agent), seen: deps.seen(agent) },
         parseMetaSearchArgs(rawArgs),
       )
       if (outcome.names.length > 0) {
@@ -163,3 +167,4 @@ export function createMetaSearchTool(deps: MetaSearchDependencies): ToolDefiniti
     },
   }
 }
+

@@ -1,57 +1,49 @@
 import { describe, expect, it } from 'vitest'
-import { appearedToolNames, seenToolPayloads } from '../../../src/host/search/seen.ts'
-import type { SessionLike } from '../../../src/host/enforcement/recalled.ts'
+import { toolNamesOf, toolPayloadsOf } from '../../../src/host/search/seen.ts'
 
-function session(
-  baseline: readonly { name: string; description?: string }[],
-  additions: readonly { name: string; description?: string }[] = [],
-): SessionLike {
-  return {
-    id: 's1',
-    toolHistory: () => ({ tools: baseline, updates: additions.map(tool => ({ additions: [tool] })) }),
-  }
-}
-
-describe('已出现过的工具', () => {
-  it('把基线与历次新增都算进去', () => {
-    const current = session([{ name: 'meta_search' }], [{ name: 'read' }, { name: 'grep' }])
-
-    expect([...appearedToolNames(current)].sort()).toEqual(['grep', 'meta_search', 'read'])
-  })
-
-  it('同一工具多次出现只记一次', () => {
-    expect([...appearedToolNames(session([], [{ name: 'read' }, { name: 'read' }]))]).toEqual(['read'])
-  })
-
-  it('日志为空时是空集合', () => {
-    expect(appearedToolNames(session([])).size).toBe(0)
-  })
-
-  it('日志读不出来时返回空集合而不是抛错', () => {
-    const broken: SessionLike = {
-      id: 's1',
-      toolHistory() {
-        throw new Error('session log is gone')
-      },
-    }
-
-    expect(appearedToolNames(broken).size).toBe(0)
-    expect(seenToolPayloads(broken).size).toBe(0)
-  })
-})
-
-describe('已出现过的载荷', () => {
-  it('描述不同即载荷不同', () => {
-    const payloads = seenToolPayloads(session([{ name: 'read', description: '旧' }], [{ name: 'read', description: '新' }]))
+describe('当前可见工具的载荷', () => {
+  it('每个工具产出一个载荷', () => {
+    const payloads = toolPayloadsOf([
+      { name: 'read', description: '读文件', parameters: { type: 'object' } },
+      { name: 'bash', description: '执行命令', parameters: { type: 'object' } },
+    ])
 
     expect(payloads.size).toBe(2)
   })
 
-  it('同一份 schema 只产生一个载荷', () => {
-    const payloads = seenToolPayloads(
-      session([{ name: 'read', description: '同一个' }], [{ name: 'read', description: '同一个' }]),
-    )
+  it('描述不同即载荷不同', () => {
+    const payloads = toolPayloadsOf([
+      { name: 'read', description: '旧' },
+      { name: 'read', description: '新' },
+    ])
+
+    expect(payloads.size).toBe(2)
+  })
+
+  it('同一份 schema 只产出一个载荷', () => {
+    const payloads = toolPayloadsOf([
+      { name: 'read', description: '同一个' },
+      { name: 'read', description: '同一个' },
+    ])
 
     expect(payloads.size).toBe(1)
+  })
+
+  it('没有可见工具时是空集合', () => {
+    expect(toolPayloadsOf([]).size).toBe(0)
+  })
+})
+
+describe('当前可见工具的名称', () => {
+  it('取出全部名称', () => {
+    expect([...toolNamesOf([{ name: 'read' }, { name: 'bash' }])]).toEqual(['read', 'bash'])
+  })
+
+  it('重复名称只留一个', () => {
+    expect([...toolNamesOf([{ name: 'read' }, { name: 'read' }])]).toEqual(['read'])
+  })
+
+  it('没有可见工具时是空集合', () => {
+    expect(toolNamesOf([]).size).toBe(0)
   })
 })

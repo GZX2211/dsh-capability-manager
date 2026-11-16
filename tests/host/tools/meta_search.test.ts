@@ -112,6 +112,24 @@ describe('执行', () => {
 
     expect(record).not.toHaveBeenCalled()
   })
+
+  it('上下文里只剩常驻工具时，被收走的工具仍能被召回', async () => {
+    // 事故回归：去重基准若用「会话历史里出现过的工具」，这里 pwsh 会被判成
+    // 已经在上下文里而剔除——会话的工具已被收走，却永远召不回来。
+    const tool = createMetaSearchTool(
+      dependencies({
+        candidates: () => new Map([['pwsh', readSchema]]),
+        // 当前可见的只有常驻的 meta_search 自己。
+        seen: () => new Set(['{"name":"meta_search","description":"召回","parameters":{}}']),
+      }),
+    )
+
+    const value = (await tool.execute({ names: 'pwsh' }, exec(fakeAgent('s1')) as never)) as {
+      tools: unknown[]
+    }
+
+    expect(value.tools).toEqual([readSchema])
+  })
 })
 
 describe('渲染', () => {
