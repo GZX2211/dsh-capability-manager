@@ -88,16 +88,25 @@ export interface SnapshotResponse {
 }
 
 /**
+ * 一次配置改动的内容，不含 revision。
+ *
+ * 单独定义成联合类型而不是 `Omit<ConfigPatch, 'revision'>`：`Omit` 作用在联合上
+ * 会合并所有成员的可选字段，调用方写出 `{ op: 'set-excluded', id, value }` 时
+ * 反而通不过检查。
+ */
+export type ConfigPatchInput =
+  | { op: 'set-excluded'; id: CapabilityId; value: boolean }
+  | { op: 'set-resident'; id: CapabilityId; value: boolean }
+  | { op: 'set-blacklist'; role: SessionRoleName; id: CapabilityId; value: boolean }
+  | { op: 'clear-blacklist'; role: SessionRoleName }
+
+/**
  * 一次配置改动。
  *
  * `revision` 是写操作的乐观并发依据：服务端不匹配时返回 `revision-conflict`
  * 与最新 revision，客户端重新拉快照后重试。
  */
-export type ConfigPatch =
-  | { op: 'set-excluded'; id: CapabilityId; value: boolean; revision: number }
-  | { op: 'set-resident'; id: CapabilityId; value: boolean; revision: number }
-  | { op: 'set-blacklist'; role: SessionRoleName; id: CapabilityId; value: boolean; revision: number }
-  | { op: 'clear-blacklist'; role: SessionRoleName; revision: number }
+export type ConfigPatch = ConfigPatchInput & { revision: number }
 
 export interface ConfigWriteResponse {
   ok: true
