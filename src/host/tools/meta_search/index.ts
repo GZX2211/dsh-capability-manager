@@ -1,0 +1,148 @@
+// src/host/tools/meta_search/index.ts
+//
+// `meta_search` 的工具定义：参数校验、调用检索编排、渲染模型可见文本。
+// 检索逻辑全部在 `search/`，这里只做 Tool-facing 适配。
+
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import type { MetaSearchRequest } from '../../search/index.ts'
+import { runMetaSearch } from '../../search/index.ts'
+import type { ToolPayloadSource } from '../../search/payload.ts'
+import type { SessionLike } from '../../enforcement/recalled.ts'
+
+export const META_SEARCH_TOOL_NAME = 'meta_search'
+
+/** 工具结果：M1 阶段 `skills` 恒为空，字段保留以免 M2 改契约。 */
+interface MetaSearchValue {
+  tools: ToolPayloadSource[]
+  skills: { name: string; description: string }[]
+  notes: string[]
+}
+
+export interface MetaSearchDependencies {
+  /** 该 agent 此刻可召回的工具：已按池、黑名单与存在性过滤。 */
+  candidates: (agent: unknown) => ReadonlyMap<string, ToolPayloadSource>
+  /** 本会话已经出现过的工具载荷。 */
+  seen: (session: SessionLike) => ReadonlySet<string>
+  /** 记录本次召回并重建可见集；只在真的返回了工具时调用。 */
+  record: (sessionId: string, outcome: { names: string[]; payloads: string[] }) => void
+}
+
+/**
+ * 收窄模型给出的参数。
+ *
+ * 参数校验是工具自己的职责（executor 只做无损快照），所以这里给出的是
+ * 模型能据此改正的错误，而不是笼统的「参数不合法」。
+ *
+ * @param rawArgs - 模型给出的参数。
+ * @returns 校验后的请求。
+ */
+export function parseMetaSearchArgs(rawArgs: unknown): MetaSearchRequest {
+  if (typeof rawArgs !== 'object' || rawArgs === null || Array.isArray(rawArgs)) {
+    throw new Error('参数必须是一个对象，可包含 names、keywords、limit')
+  }
+  const record = rawArgs as Record<string, unknown>
+  const request: MetaSearchRequest = {}
+  if (record.names !== undefined) {
+    if (typeof record.names !== 'string') throw new Error('names 必须是字符串')
+    request.names = record.names
+  }
+  if (record.keywords !== undefined) {
+    if (typeof record.keywords !== 'string') throw new Error('keywords 必须是字符串')
+    request.keywords = record.keywords
+  }
+  if (record.limit !== undefined) {
+    if (typeof record.limit !== 'number' || !Number.isFinite(record.limit)) {
+      throw new Error('limit 必须是数字')
+    }
+    request.limit = record.limit
+  }
+  return request
+}
+
+/**
+ * 渲染成模型可读文本。
+ *
+ * 明确写出「从下一步开始可调用」：restriction 重建要等下一个 step 才生效，
+ * 不说清楚模型会在同一 step 里调用刚召回的工具并拿到 UNKNOWN_TOOL。
+ */
+export function renderMetaSearch(_args: unknown, value: unknown): { type: 'text'; text: string }[] {
+  const { tools, skills, notes } = value as MetaSearchValue
+  const lines: string[] = []
+
+  if (tools.length > 0) {
+    lines.push('## 可调用的工具')
+    for (const tool of tools) {
+      lines.push('', `### ${tool.name}`, tool.description ?? '', '```json', JSON.stringify(tool.parameters ?? {}, null, 2), '```')
+      lines.push('', '（该工具从下一步开始可调用）')
+    }
+  }
+
+  if (skills.length > 0) {
+    lines.push('', '## Skill 索引', '用 `skill` 工具按名称加载正文。')
+    for (const skill of skills) lines.push(`- \`${skill.name}\`：${skill.description}`)
+  }
+
+  if (tools.length === 0 && skills.length === 0) {
+    lines.push('没有新的能力可返回。目标能力可能已在当前上下文中，或不在能力池内。')
+  }
+
+  for (const note of notes) lines.push('', `> ${note}`)
+
+  return [{ type: 'text', text: lines.join('\n') }]
+}
+
+export function createMetaSearchTool(deps: MetaSearchDependencies): ToolDefinition {
+  return {
+    name: META_SEARCH_TOOL_NAME,
+    description: `召回当前会话可用的工具与 Skill。
+
+何时调用：你不确定有哪些工具或 Skill 可用时；或已知能力名但当前看不到它的完整定义时。
+
+参数：
+- names：准确名称或名称组（支持正则片段，如 "read|write|edit"），按名称匹配，永远可用，支持批量。
+- keywords：自然语言关键词，按语义相似度召回，仅在开启向量检索时生效。
+
+返回：tools 为可直接调用的完整 schema；skills 为索引条目（name + description），
+正文需再调用 skill 工具加载。返回为空表示这些能力已在当前上下文中，或不在能力池内。
+
+失败：正则非法时返回说明并保留其余结果；向量检索未开启时 keywords 通道被忽略并在 notes 中说明。`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        names: { type: 'string', description: '名称组，支持 | 分隔的正则片段' },
+        keywords: { type: 'string', description: '自然语言关键词' },
+        limit: { type: 'number', minimum: 1, maximum: 50, description: '最多返回条数，默认 20，上限 50' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['tools', 'skills', 'notes'],
+        properties: {
+          tools: { type: 'array', items: { type: 'object' } },
+          skills: { type: 'array', items: { type: 'object' } },
+          notes: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      render: renderMetaSearch,
+    },
+    async execute(rawArgs: unknown, exec: unknown): Promise<unknown> {
+      const context = exec as { agent?: { session: SessionLike } }
+      const agent = context.agent
+      if (agent === undefined) {
+        throw new Error('meta_search 只能在会话内调用：当前没有发起调用的 agent')
+      }
+      const session = agent.session
+      const outcome = runMetaSearch(
+        { candidates: deps.candidates(agent), seen: deps.seen(session) },
+        parseMetaSearchArgs(rawArgs),
+      )
+      if (outcome.names.length > 0) {
+        deps.record(session.id, { names: outcome.names, payloads: outcome.payloads })
+      }
+      return { tools: outcome.tools, skills: outcome.skills, notes: outcome.notes }
+    },
+  }
+}
