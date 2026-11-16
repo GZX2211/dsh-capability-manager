@@ -172,14 +172,34 @@ export class EnforcementRegistry {
     // 让未知名字进到 restrict 里就等于让 agent 创建失败。
     const safe = names.filter(name => binding.present.has(name))
     if (safe.length === 0) return
+
     try {
       binding.release = binding.agent.ctx.tools.restrict({ allow: safe })
     } catch (error) {
-      this.warn(`agent ${binding.agent.id}: cannot restrict tools: ${describe(error)}`)
-      binding.release = undefined
-      binding.applyKey = ''
+      // agent 层注册的工具（`agent.ctx.tools.register`）会出现在 definitions 里，
+      // 却不受 restrict 管辖。名单里混进它们会让整次限制抛错、一条都不生效——
+      // 对这类部署（如 Personal Agent 的会话）等于本插件完全没工作。
+      // 从错误里取出真正可限制的名字，剔除后重试一次。
+      const restrictable = restrictableNamesFrom(error)
+      const retry = restrictable === undefined ? [] : safe.filter(name => restrictable.has(name))
+      if (retry.length === 0) {
+        this.warn(`agent ${binding.agent.id}: cannot restrict tools: ${describe(error)}`)
+        binding.release = undefined
+        binding.applyKey = ''
+        return
+      }
+      try {
+        binding.release = binding.agent.ctx.tools.restrict({ allow: retry })
+        binding.applied = retry
+        binding.applyKey = retry.join('\u0000')
+      } catch (retryError) {
+        this.warn(`agent ${binding.agent.id}: cannot restrict tools: ${describe(retryError)}`)
+        binding.release = undefined
+        binding.applyKey = ''
+      }
       return
     }
+
     binding.applied = safe
     binding.applyKey = safe.join('\u0000')
   }
@@ -237,6 +257,31 @@ export class EnforcementRegistry {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * 从 `restrict()` 的错误里取出「可限制的名字」全集。
+ *
+ * 官方错误形如：
+ * `tools.restrict() names unknown global tool "x"; known global tools: a, b, c`
+ *
+ * 这份解析只在失败路径上用到：它的作用是从一次失败中恢复出正确名单，
+ * 解析不出来就放弃这次限制（保持上一次状态），不会因此让 agent 创建失败。
+ *
+ * @param error - `restrict()` 抛出的错误。
+ * @returns 可限制的名字；错误形状不认识时为 undefined。
+ */
+function restrictableNamesFrom(error: unknown): Set<string> | undefined {
+  const message = error instanceof Error ? error.message : ''
+  const marker = 'known global tools: '
+  const index = message.indexOf(marker)
+  if (index < 0) return undefined
+  const tail = message.slice(index + marker.length).trim()
+  const names = tail
+    .split(',')
+    .map(name => name.trim())
+    .filter(name => name.length > 0 && name !== '(none)')
+  return names.length === 0 ? undefined : new Set(names)
 }
 
 /** 空名字集合：未知 agent 复用同一个只读实例。 */

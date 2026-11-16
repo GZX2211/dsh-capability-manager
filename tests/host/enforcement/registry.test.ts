@@ -369,6 +369,91 @@ describe('生命周期', () => {
   })
 })
 
+describe('agent 层工具不受管辖', () => {
+  /**
+   * 复刻真实语义：`agent.ctx.tools.register()` 注册的工具会出现在 definitions 里，
+   * 却不在 restrict 可命名的范围内。Personal Agent 的会话就是这种部署。
+   */
+  function agentScopedHost() {
+    const global = new Set(['meta_search', 'bash', 'read'])
+    const agentScoped = new Set(['pa_task_route'])
+    let allow: string[] = []
+    let attempts = 0
+    const recalled = new RecalledStore()
+    const registry = new EnforcementRegistry({
+      config: () => DEFAULT_CONFIG,
+      roleOf: () => undefined,
+      recalled,
+    })
+    const agent: AgentScope = {
+      id: 's1',
+      session: { id: 's1', toolHistory: () => ({ tools: [], updates: [] }) },
+      ctx: {
+        tools: {
+          definitions: () => [...global, ...agentScoped].map(name => ({ name })),
+          schemas: () => [...global, ...agentScoped].map(name => ({ name, description: name, parameters: {} })),
+          restrict(filter) {
+            attempts += 1
+            const names = [...(filter.allow ?? [])]
+            const unknown = names.filter(name => agentScoped.has(name))
+            if (unknown.length > 0) {
+              throw new Error(
+                `tools.restrict() names unknown global tool${unknown.length > 1 ? 's' : ''} ${unknown
+                  .map(name => `"${name}"`)
+                  .join(', ')}; known global tools: ${[...global].sort().join(', ')}`,
+              )
+            }
+            allow = names
+            return () => {}
+          },
+        },
+      },
+    }
+    return { registry, recalled, agent, allow: () => allow, attempts: () => attempts }
+  }
+
+  it('名单里混进 agent 层工具时剔除后重试，其余工具仍被限制', () => {
+    const host = agentScopedHost()
+    host.recalled.add('s1', ['pa_task_route'])
+
+    host.registry.onAgentCreated(host.agent)
+
+    expect(host.allow()).toEqual(['meta_search'])
+    expect(host.attempts()).toBe(2)
+  })
+
+  it('全部候选都是 agent 层工具时放弃本次限制，保留上一次状态', () => {
+    const host = agentScopedHost()
+    host.recalled.add('s1', ['pa_task_route'])
+
+    host.registry.onAgentCreated(host.agent)
+
+    // 第二次尝试仍含 agent 层工具时不再无限重试。
+    expect(host.attempts()).toBe(2)
+    expect(host.allow()).not.toContain('pa_task_route')
+  })
+
+  it('错误形状不认识时放弃限制而不是抛给调用方', () => {
+    const recalled = new RecalledStore()
+    const registry = new EnforcementRegistry({ config: () => DEFAULT_CONFIG, roleOf: () => undefined, recalled })
+    const agent: AgentScope = {
+      id: 's1',
+      session: { id: 's1', toolHistory: () => ({ tools: [], updates: [] }) },
+      ctx: {
+        tools: {
+          definitions: () => [{ name: 'meta_search' }],
+          schemas: () => [{ name: 'meta_search', description: '', parameters: {} }],
+          restrict() {
+            throw new Error('some completely different failure')
+          },
+        },
+      },
+    }
+
+    expect(() => registry.onAgentCreated(agent)).not.toThrow()
+  })
+})
+
 describe('配置与角色变化', () => {
   it('常驻变少后可见工具跟着变少', () => {
     const host = createHost({ ...DEFAULT_CONFIG, resident: ['tool:meta_search', 'tool:read'] })

@@ -35,7 +35,7 @@ import {
 export const name = 'dsh-capability-manager'
 
 /** 需要的宿主服务：缺任何一个都不该沉默地半启动。 */
-export const inject = ['tools', 'systemPrompt', 'webServer']
+export const inject = ['tools', 'systemPrompt', 'webServer', 'agents']
 
 /**
  * 索引 section 的位置：放在第一方环境后缀之后。
@@ -204,7 +204,24 @@ export function apply(ctx: HostContext, config?: Config): void {
 
   // 插件卸载时把所有 agent 的可见性还原给宿主。
   ctx.effect(() => () => enforcement.dispose(), 'capability-manager: enforcement')
+
+  // 插件热启用或重载时，已存在的 agent 不会再发 `agent/created`，上面那个监听收不到它们。
+  // 不补这一步，「启用后当前会话不受管理」和「启用后没生效」在界面上看不出区别。
+  for (const agent of listLiveAgents(ctx, log)) {
+    guard(log, `apply agent visibility for ${agent.id}`, () => enforcement.onAgentCreated(agent))
+  }
+
   log(`state directory: ${stateDir}`)
+}
+
+/** 读一次现存 agent；agents 服务不可用时返回空数组。 */
+function listLiveAgents(ctx: HostContext, log: (message: string) => void): AgentScope[] {
+  try {
+    return ctx.agents.list().map(agent => agentScopeOf(agent))
+  } catch (error) {
+    log(`cannot enumerate live agents: ${describe(error)}`)
+    return []
+  }
 }
 
 /**

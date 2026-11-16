@@ -30,14 +30,20 @@ export const META_SEARCH_DESCRIPTION = `召回当前会话可用的工具与 Ski
 
 失败：正则非法时返回说明并保留其余结果；向量检索未开启时 keywords 通道被忽略并在 notes 中说明。`
 
-/** 参数 schema；与 {@link META_SEARCH_DESCRIPTION} 一起被装配处复用。 */
+/**
+ * 参数 schema；与 {@link META_SEARCH_DESCRIPTION} 一起被装配处复用。
+ *
+ * 取值范围写进 description 而不是 `minimum`/`maximum`：工具注册只接受
+ * type/oneOf/properties/required/additionalProperties/items/enum/const 这些关键字，
+ * 用了别的会让 `tools.register()` 直接抛错、工具静默消失。
+ */
 export const META_SEARCH_PARAMETERS = {
   type: 'object',
   additionalProperties: false,
   properties: {
     names: { type: 'string', description: '名称组，支持 | 分隔的正则片段' },
     keywords: { type: 'string', description: '自然语言关键词' },
-    limit: { type: 'number', minimum: 1, maximum: 50, description: '最多返回条数，默认 20，上限 50' },
+    limit: { type: 'number', description: '最多返回条数，默认 20，上限 50' },
   },
 } as const
 
