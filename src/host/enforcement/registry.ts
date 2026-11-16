@@ -16,8 +16,6 @@ import type { RecalledStore, SessionLike } from './recalled.ts'
 export interface AgentToolsLike {
   /** 该 agent 当前可见的工具；**已应用 restriction**。 */
   definitions(scope: unknown): readonly ToolSource[]
-  /** 该 agent 当前可见工具的完整 schema；同样**已应用 restriction**。 */
-  schemas(scope: unknown): readonly ToolPayloadSource[]
   /** 只保留 `allow` 里的工具；名单含未知名字会抛错。 */
   restrict(filter: { allow?: readonly string[] }): () => void
 }
@@ -25,7 +23,16 @@ export interface AgentToolsLike {
 export interface AgentScope {
   readonly id: string
   readonly session: SessionLike
-  readonly ctx: { readonly tools: AgentToolsLike }
+  readonly ctx: {
+    readonly tools: AgentToolsLike
+    /**
+     * 把一段清理逻辑挂到 agent 的生命周期上。
+     *
+     * 用它回收 restriction，而不是只依赖插件卸载路径：agent 销毁时宿主一定会
+     * 跑这个清理，插件的卸载路径则可能因为整个 Host 一起退出而没有机会执行。
+     */
+    effect(callback: () => () => void, label?: string): () => void
+  }
 }
 
 export interface EnforcementOptions {
@@ -44,6 +51,8 @@ interface Binding {
   /** `applied` 的拼接键，用于短路比较。 */
   applyKey: string
   release?: () => void
+  /** 挂在 agent 生命周期上的兜底释放器；撤掉它只会触发一次幂等的释放。 */
+  untrack?: () => void
 }
 
 export class EnforcementRegistry {
@@ -90,6 +99,22 @@ export class EnforcementRegistry {
     this.run(() => {
       const binding: Binding = { agent, present: new Set(), applied: [], applyKey: '' }
       this.bindings.set(agent.id, binding)
+      // 兜底释放器只注册一次，且读 `binding.release` 的**当前值**。
+      // 每次重建都重新注册会掉进一个陷阱：撤掉上一个 effect 就会执行它的 cleanup，
+      // 而那个独立注册器的 disposer 会把刚建立的新限制一起删掉。
+      binding.untrack = agent.ctx.effect(
+        () => () => {
+          const release = binding.release
+          binding.release = undefined
+          binding.applyKey = ''
+          try {
+            release?.()
+          } catch {
+            // agent 正在销毁，此时无法回报，也没有可回报的对象。
+          }
+        },
+        'capability-manager: restriction',
+      )
       this.syncFully(binding)
     })
   }
@@ -98,6 +123,9 @@ export class EnforcementRegistry {
     const binding = this.bindings.get(agentId)
     if (binding === undefined) return
     this.bindings.delete(agentId)
+    // 宿主可能已经回收了这个 effect；撤掉它是幂等的，没回收时才是必要的。
+    binding.untrack?.()
+    binding.untrack = undefined
     this.release(binding)
   }
 
@@ -144,7 +172,14 @@ export class EnforcementRegistry {
    */
   private syncFully(binding: Binding): void {
     this.release(binding)
-    binding.present = this.absorb(binding.agent)
+    const absorbed = this.absorb(binding.agent)
+    binding.present = absorbed.names
+    if (absorbed.failed) {
+      // 读不到工具集就完全不动：宁可不生效，也不能把会话收进一个召不回来的状态。
+      this.warn(`agent ${binding.agent.id}: tool set unavailable, leaving visibility untouched`)
+      return
+    }
+
     const allow = this.desired(binding, binding.present)
 
     if (allow.length === 0) {
@@ -173,42 +208,61 @@ export class EnforcementRegistry {
     const safe = names.filter(name => binding.present.has(name))
     if (safe.length === 0) return
 
+    const accepted = this.restrict(binding, safe)
+    if (accepted === undefined) return
+    this.commit(binding, accepted)
+  }
+
+  /**
+   * 落实一次限制，返回被接受的名字。
+   *
+   * agent 层注册的工具（`agent.ctx.tools.register`）会出现在 definitions 里，
+   * 却不受 restrict 管辖。名单里混进它们会让整次限制抛错、一条都不生效——
+   * 对这类部署（如 Personal Agent 的会话）等于本插件完全没工作。
+   * 从错误里取出真正可限制的名字，剔除后重试一次。
+   */
+  private restrict(binding: Binding, safe: readonly string[]): string[] | undefined {
     try {
       binding.release = binding.agent.ctx.tools.restrict({ allow: safe })
+      return [...safe]
     } catch (error) {
-      // agent 层注册的工具（`agent.ctx.tools.register`）会出现在 definitions 里，
-      // 却不受 restrict 管辖。名单里混进它们会让整次限制抛错、一条都不生效——
-      // 对这类部署（如 Personal Agent 的会话）等于本插件完全没工作。
-      // 从错误里取出真正可限制的名字，剔除后重试一次。
       const restrictable = restrictableNamesFrom(error)
       const retry = restrictable === undefined ? [] : safe.filter(name => restrictable.has(name))
       if (retry.length === 0) {
         this.warn(`agent ${binding.agent.id}: cannot restrict tools: ${describe(error)}`)
         binding.release = undefined
         binding.applyKey = ''
-        return
+        return undefined
       }
       try {
         binding.release = binding.agent.ctx.tools.restrict({ allow: retry })
-        binding.applied = retry
-        binding.applyKey = retry.join('\u0000')
+        return retry
       } catch (retryError) {
         this.warn(`agent ${binding.agent.id}: cannot restrict tools: ${describe(retryError)}`)
         binding.release = undefined
         binding.applyKey = ''
+        return undefined
       }
-      return
     }
+  }
 
-    binding.applied = safe
-    binding.applyKey = safe.join('\u0000')
+  /**
+   * 记下这次限制。
+   *
+   * 释放由两条路径共同负责：插件卸载时 `dispose()` 主动释放，agent 销毁时宿主
+   * 会跑 `onAgentCreated` 里注册的那个兜底释放器。只有一条路径是不够的——
+   * 插件的卸载清理没能执行时，限制会永久留在 agent 上，而会话已经没有任何工具可用。
+   */
+  private commit(binding: Binding, names: readonly string[]): void {
+    binding.applied = names
+    binding.applyKey = names.join('\u0000')
   }
 
   private release(binding: Binding): void {
     const release = binding.release
-    if (release === undefined) return
     binding.release = undefined
     binding.applyKey = ''
+    if (release === undefined) return
     try {
       release()
     } catch (error) {
@@ -220,24 +274,32 @@ export class EnforcementRegistry {
   /**
    * 读取 agent 当前的完整工具集，并并入全集与 schema 缓存。
    *
-   * 必须在解除自己的 restriction 之后调用：`definitions()` 与 `schemas()` 返回的
-   * 都是应用过 restriction 的可见集，不解除就读不到被自己掩掉的工具。
+   * 必须在解除自己的 restriction 之后调用：`definitions()` 返回的是应用过
+   * restriction 的可见集，不解除就读不到被自己掩掉的工具。
+   *
+   * 只用 `definitions()`：`ToolDefinition` 本来就带 name/description/parameters，
+   * 而 `schemas()` 会多做一次投影、并且对个别官方工具可能抛错。曾经因为
+   * `schemas()` 抛错导致 schema 缓存为空、召回永远返回空——整个会话的工具
+   * 被收走后却召不回来。
    */
-  private absorb(agent: AgentScope): Set<string> {
+  private absorb(agent: AgentScope): { names: Set<string>; failed: boolean } {
     const names = new Set<string>()
     try {
-      for (const definition of agent.ctx.tools.definitions(agent)) names.add(definition.name)
-      for (const schema of agent.ctx.tools.schemas(agent)) {
-        names.add(schema.name)
-        this.schemaCache.set(schema.name, schema)
+      for (const definition of agent.ctx.tools.definitions(agent)) {
+        names.add(definition.name)
+        this.schemaCache.set(definition.name, {
+          name: definition.name,
+          description: definition.description,
+          parameters: definition.parameters,
+        })
       }
     } catch (error) {
-      // 读不到就当作「一个都没有」：这次不重建，等下一次 tools/change。
+      // 读不到就不能收紧：present 不可信时收紧等于把工具藏进一个读不到的地方。
       this.warn(`agent ${agent.id}: cannot read tool definitions: ${describe(error)}`)
-      return names
+      return { names, failed: true }
     }
     for (const name of names) this.universeNames.add(name)
-    return names
+    return { names, failed: false }
   }
 
   private run(operation: () => void): void {

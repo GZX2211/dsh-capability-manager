@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import { EnforcementRegistry, type AgentScope } from '../../../src/host/enforcement/registry.ts'
 import { RecalledStore, type SessionLike } from '../../../src/host/enforcement/recalled.ts'
+import type { ToolSource } from '../../../src/host/catalog/collect.ts'
 import { DEFAULT_CONFIG, type CapabilityConfig, type SessionRoleName } from '../../../src/shared/config.ts'
 
-/** 最小宿主替身：模拟 tools 注册表、每个 agent 的限制，以及限制校验。 */
-interface Host {
+/** 最小宿主替身：模拟 tools 注册表、每个 agent 的限制，以及限制校验。 */interface Host {
   readonly registry: EnforcementRegistry
   readonly recalled: RecalledStore
   register(name: string): void
   unregister(name: string): void
   createAgent(id: string, additions?: readonly string[]): AgentScope
+  /** 只跑宿主侧的 agent 清理，不通知 registry。 */
+  runAgentCleanups(id: string): void
   disposeAgent(id: string): void
   /** 当前对该 agent 可见的工具名。 */
   visible(id: string): string[]
@@ -20,20 +22,27 @@ interface Host {
   restrictCalls(): number
 }
 
-function createHost(initial: CapabilityConfig = DEFAULT_CONFIG): Host {
-  const global = new Set<string>()
+function agentEffect(callback: () => () => void): () => void {
+  const cleanup = callback()
+  return () => cleanup()
+}
+
+function createHost(initial: CapabilityConfig = DEFAULT_CONFIG): Host {  const global = new Set<string>()
   /** agentId → 当前生效的 allow；不存在表示未受限。 */
   const restrictions = new Map<string, Set<string>>()
   const agents = new Map<string, AgentScope>()
+  const agentCleanups = new Map<string, (() => void)[]>()
   const changes: (() => void)[] = []
   const roles = new Map<string, SessionRoleName | undefined>()
   let config = initial
   let calls = 0
   const log = vi.fn()
 
-  const definitionsOf = (agentId: string): { name: string }[] => {
+  const definitionsOf = (agentId: string): ToolSource[] => {
     const allow = restrictions.get(agentId)
-    return [...global].filter(name => allow === undefined || allow.has(name)).map(name => ({ name }))
+    return [...global]
+      .filter(name => allow === undefined || allow.has(name))
+      .map(name => ({ name, description: `${name} 的说明`, parameters: {} }))
   }
 
   const recalled = new RecalledStore()
@@ -64,18 +73,15 @@ function createHost(initial: CapabilityConfig = DEFAULT_CONFIG): Host {
   }
 
   function createAgent(id: string, additions: readonly string[] = []): AgentScope {
+    /** agent 卸载时要跑的清理，模拟宿主对 agent.ctx.effect 的回收。 */
+    const cleanups: (() => void)[] = []
+    agentCleanups.set(id, cleanups)
     const agent: AgentScope = {
       id,
       session: session(id, additions),
       ctx: {
         tools: {
           definitions: () => definitionsOf(id),
-          schemas: () =>
-            definitionsOf(id).map(definition => ({
-              name: definition.name,
-              description: `${definition.name} 的说明`,
-              parameters: {},
-            })),
           restrict: filter => {
             const allow = [...(filter.allow ?? [])]
             // 与真实 API 一致：空名单、未知名字都抛错。
@@ -92,6 +98,15 @@ function createHost(initial: CapabilityConfig = DEFAULT_CONFIG): Host {
               else restrictions.set(id, previous)
             }
           },
+        },
+        effect(callback) {
+          const cleanup = callback()
+          cleanups.push(cleanup)
+          return () => {
+            const index = cleanups.indexOf(cleanup)
+            if (index >= 0) cleanups.splice(index, 1)
+            cleanup()
+          }
         },
       },
     }
@@ -110,8 +125,14 @@ function createHost(initial: CapabilityConfig = DEFAULT_CONFIG): Host {
     register,
     unregister,
     createAgent,
+    runAgentCleanups(id) {
+      for (const cleanup of agentCleanups.get(id) ?? []) cleanup()
+    },
     disposeAgent(id) {
       agents.delete(id)
+      // 宿主销毁 agent 时会跑 agent.ctx.effect 注册的清理。
+      for (const cleanup of agentCleanups.get(id) ?? []) cleanup()
+      agentCleanups.delete(id)
       registry.onAgentDisposed(id)
     },
     visible: id =>
@@ -367,6 +388,34 @@ describe('生命周期', () => {
 
     expect(() => host.disposeAgent('never-existed')).not.toThrow()
   })
+
+  it('宿主回收 agent 的 effect 就足以恢复可见性，不依赖插件自己的清理', () => {
+    // 这是那次「插件卸载后限制仍在」事故的防线：兜底释放器挂在 agent 生命周期上，
+    // 插件的卸载清理没能执行时，宿主销毁 agent 仍然会把限制解开。
+    const host = createHost({ ...DEFAULT_CONFIG, resident: ['tool:meta_search'] })
+    for (const name of ['bash', 'meta_search']) host.register(name)
+    host.createAgent('s1')
+    expect(host.visible('s1')).toEqual(['meta_search'])
+
+    // 只跑宿主侧的 agent 清理，不通知 registry。
+    host.runAgentCleanups('s1')
+
+    expect(host.visible('s1')).toEqual(['bash', 'meta_search'])
+  })
+
+  it('重复解除不会把后来的限制一起抹掉', () => {
+    const host = createHost({ ...DEFAULT_CONFIG, resident: ['tool:meta_search'] })
+    for (const name of ['bash', 'meta_search', 'read']) host.register(name)
+    host.createAgent('s1')
+    host.recalled.add('s1', ['read'])
+    host.registry.rebuild()
+    expect(host.visible('s1')).toEqual(['meta_search', 'read'])
+
+    // 再重建一次：旧释放器若被重复执行，就会把刚建立的新限制删掉。
+    host.registry.rebuild()
+
+    expect(host.visible('s1')).toEqual(['meta_search', 'read'])
+  })
 })
 
 describe('agent 层工具不受管辖', () => {
@@ -389,9 +438,9 @@ describe('agent 层工具不受管辖', () => {
       id: 's1',
       session: { id: 's1', toolHistory: () => ({ tools: [], updates: [] }) },
       ctx: {
+        effect: agentEffect,
         tools: {
           definitions: () => [...global, ...agentScoped].map(name => ({ name })),
-          schemas: () => [...global, ...agentScoped].map(name => ({ name, description: name, parameters: {} })),
           restrict(filter) {
             attempts += 1
             const names = [...(filter.allow ?? [])]
@@ -440,9 +489,9 @@ describe('agent 层工具不受管辖', () => {
       id: 's1',
       session: { id: 's1', toolHistory: () => ({ tools: [], updates: [] }) },
       ctx: {
+        effect: agentEffect,
         tools: {
           definitions: () => [{ name: 'meta_search' }],
-          schemas: () => [{ name: 'meta_search', description: '', parameters: {} }],
           restrict() {
             throw new Error('some completely different failure')
           },
@@ -510,11 +559,9 @@ describe('降级', () => {
       id: 's1',
       session: { id: 's1', toolHistory: () => ({ tools: [], updates: [] }) },
       ctx: {
+        effect: agentEffect,
         tools: {
           definitions() {
-            throw new Error('tool registry is gone')
-          },
-          schemas() {
             throw new Error('tool registry is gone')
           },
           restrict,
@@ -539,9 +586,9 @@ describe('降级', () => {
       id: 's1',
       session: { id: 's1', toolHistory: () => ({ tools: [], updates: [] }) },
       ctx: {
+        effect: agentEffect,
         tools: {
           definitions: () => ['meta_search', 'read'].map(name => ({ name })),
-          schemas: () => ['meta_search', 'read'].map(name => ({ name, description: name, parameters: {} })),
           restrict(filter) {
             allow = [...(filter.allow ?? [])]
             return () => {
@@ -560,4 +607,7 @@ describe('降级', () => {
     expect(allow).toEqual(['meta_search', 'read'])
   })
 })
+
+
+
 

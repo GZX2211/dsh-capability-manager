@@ -14,6 +14,8 @@ const SUMMARY_LIMIT = 200
 export interface ToolSource {
   readonly name: string
   readonly description?: string | undefined
+  /** 参数 schema；列表与摘要不用它，但吸收时需要把它存进 schema 缓存。 */
+  readonly parameters?: unknown
 }
 
 export interface CollectToolsInput {
