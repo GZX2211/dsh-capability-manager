@@ -1,0 +1,5 @@
+# dsh-capability-manager bundle layer: inserts the capability manager plugin.
+# Its state directory defaults to <DSH_HOME>/state/capability-manager.
+- insert:
+    - id: capability-manager
+      name: dsh-capability-manager
