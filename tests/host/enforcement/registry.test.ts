@@ -70,6 +70,12 @@ function createHost(initial: CapabilityConfig = DEFAULT_CONFIG): Host {
       ctx: {
         tools: {
           definitions: () => definitionsOf(id),
+          schemas: () =>
+            definitionsOf(id).map(definition => ({
+              name: definition.name,
+              description: `${definition.name} 的说明`,
+              parameters: {},
+            })),
           restrict: filter => {
             const allow = [...(filter.allow ?? [])]
             // 与真实 API 一致：空名单、未知名字都抛错。
@@ -235,9 +241,40 @@ describe('全集的维护', () => {
 
   it('本插件自己注册的工具无需经过吸收也留在全集里', () => {
     const host = createHost()
-    host.registry.noteOwnTool('meta_search')
+    host.registry.noteOwnTool('meta_search', { name: 'meta_search', description: '召回' })
 
     expect([...host.registry.universe]).toEqual(['meta_search'])
+    expect(host.registry.schemasOf().get('meta_search')?.description).toBe('召回')
+  })
+
+  it('吸收时缓存完整 schema，供 meta_search 返回可直接调用的定义', () => {
+    const host = createHost({ ...DEFAULT_CONFIG, resident: ['tool:meta_search'] })
+    host.register('meta_search')
+    host.createAgent('s1')
+
+    expect(host.registry.schemasOf().get('meta_search')).toEqual({
+      name: 'meta_search',
+      description: 'meta_search 的说明',
+      parameters: {},
+    })
+  })
+
+  it('被掩掉的工具 schema 仍然在缓存里：召回要能返回它', () => {
+    const host = createHost({ ...DEFAULT_CONFIG, resident: ['tool:meta_search'] })
+    for (const name of ['bash', 'meta_search']) host.register(name)
+    host.createAgent('s1')
+    expect(host.visible('s1')).toEqual(['meta_search'])
+
+    expect(host.registry.schemasOf().has('bash')).toBe(true)
+  })
+
+  it('presentOf 反映该 agent 当前存在的工具', () => {
+    const host = createHost({ ...DEFAULT_CONFIG, resident: ['tool:meta_search'] })
+    for (const name of ['bash', 'meta_search']) host.register(name)
+    host.createAgent('s1')
+
+    expect([...host.registry.presentOf('s1')].sort()).toEqual(['bash', 'meta_search'])
+    expect(host.registry.presentOf('unknown').size).toBe(0)
   })
 
   it('tools/change 后能发现新注册的工具', () => {
@@ -392,6 +429,9 @@ describe('降级', () => {
           definitions() {
             throw new Error('tool registry is gone')
           },
+          schemas() {
+            throw new Error('tool registry is gone')
+          },
           restrict,
         },
       },
@@ -416,6 +456,7 @@ describe('降级', () => {
       ctx: {
         tools: {
           definitions: () => ['meta_search', 'read'].map(name => ({ name })),
+          schemas: () => ['meta_search', 'read'].map(name => ({ name, description: name, parameters: {} })),
           restrict(filter) {
             allow = [...(filter.allow ?? [])]
             return () => {
@@ -434,3 +475,4 @@ describe('降级', () => {
     expect(allow).toEqual(['meta_search', 'read'])
   })
 })
+

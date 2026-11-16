@@ -8,6 +8,7 @@
 
 import { computeAllow } from '../policy/visible.ts'
 import type { ToolSource } from '../catalog/collect.ts'
+import type { ToolPayloadSource } from '../search/payload.ts'
 import type { CapabilityConfig, SessionRoleName } from '../../shared/config.ts'
 import type { RecalledStore, SessionLike } from './recalled.ts'
 
@@ -15,6 +16,8 @@ import type { RecalledStore, SessionLike } from './recalled.ts'
 export interface AgentToolsLike {
   /** 该 agent 当前可见的工具；**已应用 restriction**。 */
   definitions(scope: unknown): readonly ToolSource[]
+  /** 该 agent 当前可见工具的完整 schema；同样**已应用 restriction**。 */
+  schemas(scope: unknown): readonly ToolPayloadSource[]
   /** 只保留 `allow` 里的工具；名单含未知名字会抛错。 */
   restrict(filter: { allow?: readonly string[] }): () => void
 }
@@ -46,6 +49,8 @@ interface Binding {
 export class EnforcementRegistry {
   /** 本部署中出现过的全部工具名。计算 allow 的唯一依据，只增不减。 */
   private readonly universeNames = new Set<string>()
+  /** 工具名的完整 schema。schema 与 agent 无关，因此插件级共享。 */
+  private readonly schemaCache = new Map<string, ToolPayloadSource>()
   private readonly bindings = new Map<string, Binding>()
   /** 自身引发的 `tools/change` 不再触发重入。 */
   private busy = false
@@ -57,9 +62,27 @@ export class EnforcementRegistry {
     return this.universeNames
   }
 
-  /** 记录本插件自己注册的工具名：注册方自己知道名字，不必等吸收。 */
-  noteOwnTool(name: string): void {
+  /** 已缓存的工具 schema；`meta_search` 据此返回可直接调用的定义。 */
+  schemasOf(): ReadonlyMap<string, ToolPayloadSource> {
+    return this.schemaCache
+  }
+
+  /** 某个 agent 此刻存在的工具名；未知 agent 返回空集。 */
+  presentOf(agentId: string): ReadonlySet<string> {
+    return this.bindings.get(agentId)?.present ?? EMPTY_NAMES
+  }
+
+  /**
+   * 记录本插件自己注册的工具。
+   *
+   * 注册方自己知道名字与 schema，不必等下一次吸收——`meta_search` 自己也要能被召回。
+   *
+   * @param name - 工具名。
+   * @param schema - 该工具的完整 schema。
+   */
+  noteOwnTool(name: string, schema?: ToolPayloadSource): void {
     this.universeNames.add(name)
+    if (schema !== undefined) this.schemaCache.set(name, schema)
   }
 
   /** agent 创建：先吸收全集再应用限制。顺序颠倒会让被掩掉的工具永远读不到。 */
@@ -174,18 +197,26 @@ export class EnforcementRegistry {
     }
   }
 
-  /** 读取 agent 当前的完整工具集，并并入全集。 */
+  /**
+   * 读取 agent 当前的完整工具集，并并入全集与 schema 缓存。
+   *
+   * 必须在解除自己的 restriction 之后调用：`definitions()` 与 `schemas()` 返回的
+   * 都是应用过 restriction 的可见集，不解除就读不到被自己掩掉的工具。
+   */
   private absorb(agent: AgentScope): Set<string> {
     const names = new Set<string>()
     try {
-      for (const definition of agent.ctx.tools.definitions(agent)) {
-        names.add(definition.name)
-        this.universeNames.add(definition.name)
+      for (const definition of agent.ctx.tools.definitions(agent)) names.add(definition.name)
+      for (const schema of agent.ctx.tools.schemas(agent)) {
+        names.add(schema.name)
+        this.schemaCache.set(schema.name, schema)
       }
     } catch (error) {
       // 读不到就当作「一个都没有」：这次不重建，等下一次 tools/change。
       this.warn(`agent ${agent.id}: cannot read tool definitions: ${describe(error)}`)
+      return names
     }
+    for (const name of names) this.universeNames.add(name)
     return names
   }
 
@@ -207,3 +238,6 @@ export class EnforcementRegistry {
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
+
+/** 空名字集合：未知 agent 复用同一个只读实例。 */
+const EMPTY_NAMES: ReadonlySet<string> = new Set()

@@ -11,6 +11,36 @@ import type { SessionLike } from '../../enforcement/recalled.ts'
 
 export const META_SEARCH_TOOL_NAME = 'meta_search'
 
+/**
+ * 工具描述。
+ *
+ * 导出而不是内联在定义里：装配处也要用它登记「本插件自建了哪些工具」，
+ * 两处各写一份迟早会漂移。
+ */
+export const META_SEARCH_DESCRIPTION = `召回当前会话可用的工具与 Skill。
+
+何时调用：你不确定有哪些工具或 Skill 可用时；或已知能力名但当前看不到它的完整定义时。
+
+参数：
+- names：准确名称或名称组（支持正则片段，如 "read|write|edit"），按名称匹配，永远可用，支持批量。
+- keywords：自然语言关键词，按语义相似度召回，仅在开启向量检索时生效。
+
+返回：tools 为可直接调用的完整 schema；skills 为索引条目（name + description），
+正文需再调用 skill 工具加载。返回为空表示这些能力已在当前上下文中，或不在能力池内。
+
+失败：正则非法时返回说明并保留其余结果；向量检索未开启时 keywords 通道被忽略并在 notes 中说明。`
+
+/** 参数 schema；与 {@link META_SEARCH_DESCRIPTION} 一起被装配处复用。 */
+export const META_SEARCH_PARAMETERS = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    names: { type: 'string', description: '名称组，支持 | 分隔的正则片段' },
+    keywords: { type: 'string', description: '自然语言关键词' },
+    limit: { type: 'number', minimum: 1, maximum: 50, description: '最多返回条数，默认 20，上限 50' },
+  },
+} as const
+
 /** 工具结果：M1 阶段 `skills` 恒为空，字段保留以免 M2 改契约。 */
 interface MetaSearchValue {
   tools: ToolPayloadSource[]
@@ -94,27 +124,8 @@ export function renderMetaSearch(_args: unknown, value: unknown): { type: 'text'
 export function createMetaSearchTool(deps: MetaSearchDependencies): ToolDefinition {
   return {
     name: META_SEARCH_TOOL_NAME,
-    description: `召回当前会话可用的工具与 Skill。
-
-何时调用：你不确定有哪些工具或 Skill 可用时；或已知能力名但当前看不到它的完整定义时。
-
-参数：
-- names：准确名称或名称组（支持正则片段，如 "read|write|edit"），按名称匹配，永远可用，支持批量。
-- keywords：自然语言关键词，按语义相似度召回，仅在开启向量检索时生效。
-
-返回：tools 为可直接调用的完整 schema；skills 为索引条目（name + description），
-正文需再调用 skill 工具加载。返回为空表示这些能力已在当前上下文中，或不在能力池内。
-
-失败：正则非法时返回说明并保留其余结果；向量检索未开启时 keywords 通道被忽略并在 notes 中说明。`,
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        names: { type: 'string', description: '名称组，支持 | 分隔的正则片段' },
-        keywords: { type: 'string', description: '自然语言关键词' },
-        limit: { type: 'number', minimum: 1, maximum: 50, description: '最多返回条数，默认 20，上限 50' },
-      },
-    },
+    description: META_SEARCH_DESCRIPTION,
+    parameters: META_SEARCH_PARAMETERS,
     output: {
       schema: {
         type: 'object',
