@@ -23,6 +23,10 @@ export const ROUTES = {
   health: `${API_PREFIX}/health`,
   snapshot: `${API_PREFIX}/snapshot`,
   config: `${API_PREFIX}/config`,
+  /** 手动创建一个自建 Skill 的骨架。 */
+  createSkill: `${API_PREFIX}/skills`,
+  /** 在系统文件管理器里打开某个自建能力的目录。 */
+  reveal: `${API_PREFIX}/reveal`,
 } as const
 
 /** 稳定错误码：客户端按码分支，不吞错。 */
@@ -34,6 +38,12 @@ export const ERROR_CODES = {
   badRequest: 'bad-request',
   revisionConflict: 'revision-conflict',
   unknownCapability: 'unknown-capability',
+  /** 目标能力不是本插件自建的，没有可打开的目录。 */
+  notOwned: 'not-owned',
+  /** 创建骨架失败：目录不可写、名称无法分配等。 */
+  createFailed: 'create-failed',
+  /** 调起系统文件管理器失败。 */
+  revealFailed: 'reveal-failed',
   embeddingUnavailable: 'embedding-unavailable',
   embeddingDownloadFailed: 'embedding-download-failed',
   internal: 'internal',
@@ -122,4 +132,30 @@ export type ConfigPatch = ConfigPatchInput & { revision: number }
 export interface ConfigWriteResponse {
   ok: true
   revision: number
+}
+
+/**
+ * 手动创建 Skill 的请求。
+ *
+ * `revision` 与配置写入同源：创建会同时把新 Skill 记进「排出池」，因此仍是一次
+ * 配置变更，必须让并发窗口里的另一个写入先失败。
+ */
+export interface CreateSkillRequest {
+  revision: number
+}
+
+/** 创建成功后的结果：带上新能力的完整条目，界面无需再查一次也能定位它。 */
+export interface CreateSkillResponse {
+  ok: true
+  revision: number
+  capability: CapabilityEntry
+}
+
+/** 打开某个自建能力目录的请求。 */
+export interface RevealRequest {
+  id: CapabilityId
+}
+
+export interface RevealResponse {
+  ok: true
 }
