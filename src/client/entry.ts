@@ -23,6 +23,24 @@ export function apply(ctx: ClientContext): void {
   // 不会让整个面板消失。
   const translate = (): Translate => translateFor(detectLanguage(ctx.locale.getLocale()))
 
+  /**
+   * 新建会话并预填创建能力的引导语。
+   *
+   * `uiWorkspace` 是宿主可选服务：没有它时返回 false，由面板提示这一环境没有入口，
+   * 而不是把一个点了没反应的按钮留在页面上。
+   *
+   * @returns 是否已发起导航。
+   */
+  const createWithAgent = (): boolean => {
+    const workspace = ctx.get('uiWorkspace')
+    if (workspace === undefined) return false
+    workspace.startSession(undefined, {
+      prompt: translate()('createPrompt'),
+      whenDraftExists: 'append',
+    })
+    return true
+  }
+
   ctx.effect(() => installStyles(), 'capability-manager: styles')
 
   ctx.effect(
@@ -32,7 +50,7 @@ export function apply(ctx: ClientContext): void {
           {
             name: 'main',
             key: PANEL_ID as MainPanelId,
-            inject: () => ({ t: translate() }),
+            inject: () => ({ t: translate(), onCreateWithAgent: createWithAgent }),
           },
           Manager,
         ),
