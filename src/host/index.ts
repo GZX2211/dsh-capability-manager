@@ -29,7 +29,7 @@ import { skillPayload } from './search/payload.ts'
 import { toolNamesOf, toolPayloadsOf } from './search/seen.ts'
 import { catalogEntries } from './skill-consumer/catalog.ts'
 import { createCatalogListener, type CatalogPlan } from './skill-consumer/catalog-inject.ts'
-import { isSkillToolUsable, shouldInjectSkillCatalog } from './skill-consumer/policy.ts'
+import { isSkillGestureAllowed, isSkillToolUsable, shouldInjectSkillCatalog } from './skill-consumer/policy.ts'
 import {
   allSkillSummaries,
   eligibleSkills,
@@ -178,6 +178,14 @@ export function apply(ctx: HostContext, config?: Config): void {
                 signal,
               })
               return { active: true, entries: catalogEntries(skills) }
+            },
+            skillInvocationAllowed: (agent, name) => {
+              const context = skillContextOf(agent)
+              return isSkillGestureAllowed({
+                id: skillId(name),
+                config: context.config,
+                role: context.role,
+              })
             },
             log,
           }),

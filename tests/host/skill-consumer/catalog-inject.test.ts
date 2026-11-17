@@ -36,6 +36,11 @@ function officialCatalog(): UserMessage {
   return { source: { kind: 'skill-catalog', entries: [] } } as unknown as UserMessage
 }
 
+/** 官方的 `/name` 手势注入消息；我们只关心它的来源与名称。 */
+function skillInvocation(name: string): UserMessage {
+  return { source: { kind: 'skill-invocation', name, form: 'instructions' } } as unknown as UserMessage
+}
+
 interface Harness {
   readonly payload: {
     agent: { session: { deriveMessages(): readonly UserMessage[] } }
@@ -246,6 +251,44 @@ describe('不注入与退役', () => {
   })
 })
 
+describe('用户显式 /name 注入过滤', () => {
+  it('不允许的 skill-invocation 被移除，普通用户消息保留', async () => {
+    const h = harness()
+    h.deps.skillInvocationAllowed = (_agent, name) => name !== 'excluded-skill'
+    h.next.mockResolvedValue({
+      kind: 'enter',
+      messages: [skillInvocation('excluded-skill'), userMessage()],
+    })
+
+    const decision = await injectCatalogStep(h.deps, h.payload, h.next)
+
+    if (decision.kind !== 'enter') throw new Error('expected enter')
+    expect(decision.messages.some(message => (message.source as { kind?: string }).kind === 'skill-invocation')).toBe(false)
+    expect(decision.messages.some(message => (message.source as { kind?: string }).kind === 'user')).toBe(true)
+  })
+
+  it('允许的 skill-invocation 原样保留', async () => {
+    const h = harness()
+    h.deps.skillInvocationAllowed = () => true
+    h.next.mockResolvedValue({ kind: 'enter', messages: [skillInvocation('allowed-skill')] })
+
+    const decision = await injectCatalogStep(h.deps, h.payload, h.next)
+
+    if (decision.kind !== 'enter') throw new Error('expected enter')
+    expect(decision.messages.some(message => (message.source as { kind?: string }).kind === 'skill-invocation')).toBe(true)
+  })
+
+  it('未接过滤时不干预决策', async () => {
+    const h = harness()
+    h.next.mockResolvedValue({ kind: 'enter', messages: [skillInvocation('any-skill')] })
+
+    const decision = await injectCatalogStep(h.deps, h.payload, h.next)
+
+    if (decision.kind !== 'enter') throw new Error('expected enter')
+    expect(decision.messages.some(message => (message.source as { kind?: string }).kind === 'skill-invocation')).toBe(true)
+  })
+})
+
 describe('失败隔离', () => {
   it('目录计算失败时返回原决策并记 warning', async () => {
     const h = harness({ plan: new Error('skill registry unavailable') })
@@ -255,7 +298,6 @@ describe('失败隔离', () => {
     expect(catalogOf(decision)).toBeUndefined()
     expect(h.log).toHaveBeenCalled()
   })
-
   it('读取会话历史失败时返回原决策并记 warning', async () => {
     const h = harness({ deriveThrows: new Error('session detached') })
 

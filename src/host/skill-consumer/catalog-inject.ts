@@ -32,6 +32,13 @@ export interface CatalogInjectDependencies {
    * 模型在下一个 step 忘掉可用能力。
    */
   catalogOf: (agent: unknown, signal: AbortSignal) => Promise<CatalogPlan>
+  /**
+   * 官方 `/name` 手势注入的 Skill 是否允许。
+   *
+   * 手势路径不经过 shadow `skill` 工具，因此这里是池/黑名单在注入侧的第二个
+   * 校验点；缺省表示不干预（测试或未接线时保持原行为）。
+   */
+  skillInvocationAllowed?: (agent: unknown, name: string) => boolean
   log?: (message: string) => void
 }
 
@@ -67,6 +74,9 @@ export async function injectCatalogStep(
 ): Promise<PreStepDecision> {
   const decision = await next()
   if (decision.kind === 'reject') return decision
+
+  const messages = filterSkillInvocations(decision.messages, payload.agent, deps)
+  const base = messages === decision.messages ? decision : { ...decision, messages }
 
   const { signal } = payload
   let history: readonly Message[]
@@ -113,9 +123,36 @@ export async function injectCatalogStep(
 
   // 同一 step 的决策里可能已经带着一条目录（例如恢复中的会话），替换而不是追加。
   return {
-    ...decision,
-    messages: [...decision.messages.filter(item => readCatalogEntries(item.source) === undefined), message],
+    ...base,
+    messages: [...base.messages.filter(item => readCatalogEntries(item.source) === undefined), message],
   }
+}
+
+/**
+ * 移除池外 / 黑名单 Skill 的用户显式注入。
+ *
+ * 官方 gesture listener 与我们的 shadow 工具是两条独立路径；只 shadow 工具
+ * 挡不住 `/name`。这里在 `next()` 之后过滤本次决策里新注入的 `skill-invocation`
+ * 消息，历史里已经提交的正文不受影响（addition-only 的已知限制）。
+ */
+function filterSkillInvocations(
+  messages: UserMessage[],
+  agent: unknown,
+  deps: CatalogInjectDependencies,
+): UserMessage[] {
+  const allowed = deps.skillInvocationAllowed
+  if (allowed === undefined) return messages
+
+  let changed = false
+  const kept = messages.filter(message => {
+    const source = message.source as unknown as { kind?: unknown; name?: unknown }
+    if (source.kind !== 'skill-invocation') return true
+    const name = typeof source.name === 'string' ? source.name : ''
+    const accepted = name.length > 0 && allowed(agent, name)
+    if (!accepted) changed = true
+    return accepted
+  })
+  return changed ? kept : messages
 }
 
 /**
