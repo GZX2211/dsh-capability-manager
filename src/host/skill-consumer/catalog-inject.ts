@@ -13,6 +13,7 @@ import {
   catalogDigest,
   CATALOG_SOURCE_KIND,
   findPublishedCatalog,
+  hasCatalogHistory,
   readCatalogEntries,
   renderCatalog,
   type CatalogEntry,
@@ -78,6 +79,7 @@ export async function injectCatalogStep(
   }
 
   const published = findPublishedCatalog(history)
+  const anyCatalog = published !== undefined || hasCatalogHistory(history)
 
   let plan: CatalogPlan
   try {
@@ -90,14 +92,15 @@ export async function injectCatalogStep(
   if (signal.aborted) throw signal.reason
 
   const desired = plan.active ? plan.entries : []
-  if (published === undefined) {
-    // 首版空目录没有信息量；不注入模式也无需退役任何名称。
-    if (!plan.active || desired.length === 0) return decision
-  } else if (catalogDigest(published) === catalogDigest(desired)) {
+  if (published !== undefined && catalogDigest(published) === catalogDigest(desired)) {
     return decision
   }
+  if (published === undefined && !anyCatalog) {
+    // 首版空目录没有信息量；不注入模式也无需退役任何名称。
+    if (!plan.active || desired.length === 0) return decision
+  }
 
-  const update = published !== undefined
+  const update = anyCatalog
   const message = createUserMessage({
     content: [{ type: 'text', text: renderCatalog(desired, update ? 'update' : 'initial') }],
     source: {

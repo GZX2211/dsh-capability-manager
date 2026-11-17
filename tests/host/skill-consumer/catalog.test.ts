@@ -4,6 +4,7 @@ import {
   catalogEntries,
   CATALOG_SOURCE_KIND,
   findPublishedCatalog,
+  hasCatalogHistory,
   readCatalogEntries,
   renderCatalog,
   type CatalogEntry,
@@ -143,5 +144,12 @@ describe('目录来源读取', () => {
     ]
 
     expect(findPublishedCatalog(messages)).toEqual([entry('old')])
+  })
+
+  it('识别官方 skill-catalog 的存在，即使我们读不懂它的条目', () => {
+    expect(hasCatalogHistory([{ source: { kind: 'skill-catalog', entries: [] } }])).toBe(true)
+    expect(hasCatalogHistory([{ source: { kind: CATALOG_SOURCE_KIND, entries: [entry('a')] } }])).toBe(true)
+    expect(hasCatalogHistory([{ source: { kind: 'user' } }])).toBe(false)
+    expect(hasCatalogHistory([])).toBe(false)
   })
 })

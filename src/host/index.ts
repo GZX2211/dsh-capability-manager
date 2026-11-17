@@ -181,6 +181,10 @@ export function apply(ctx: HostContext, config?: Config): void {
             },
             log,
           }),
+          // 必须是最外层 listener：waterfall 的 outer 在 next() 返回后才追加消息，
+          // 也就是最后写入 decision.messages。官方 consumer 若在我们内层追了一条
+          // 空目录退役旧名称，我们的目录必须排在它后面才能生效。
+          { prepend: true },
         ),
       'capability-manager: skill catalog',
     )

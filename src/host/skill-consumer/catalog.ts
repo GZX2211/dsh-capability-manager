@@ -159,6 +159,26 @@ export function findPublishedCatalog(messages: readonly CatalogMessageLike[]): C
   return undefined
 }
 
+/**
+ * 会话里是否曾经出现过任意 Skill 目录（我们自己的或官方的）。
+ *
+ * 用于决定首版目录的措辞：插件热启用时官方目录可能已经发布过，官方 consumer
+ * 会在 shadow 生效的那一步追加一条空目录；我们必须用替换框架把它的名称退役
+ * 声明覆盖掉，而不是再追加一条「首版」。
+ *
+ * @param messages - 模型可见的消息，按时间顺序。
+ * @returns 存在任一目录消息时为 true。
+ */
+export function hasCatalogHistory(messages: readonly CatalogMessageLike[]): boolean {
+  for (const message of messages) {
+    const source = message.source
+    if (typeof source !== 'object' || source === null) continue
+    const kind = (source as { kind?: unknown }).kind
+    if (kind === CATALOG_SOURCE_KIND || kind === 'skill-catalog') return true
+  }
+  return false
+}
+
 /** 描述会原样嵌进伪 XML 框架，必须转义标记字符。 */
 function escapeCatalogText(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')

@@ -31,6 +31,11 @@ function userMessage(text = '用户输入'): UserMessage {
   return createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
 }
 
+/** 官方 consumer 的目录消息；我们只关心它存在，不读它的条目。 */
+function officialCatalog(): UserMessage {
+  return { source: { kind: 'skill-catalog', entries: [] } } as unknown as UserMessage
+}
+
 interface Harness {
   readonly payload: {
     agent: { session: { deriveMessages(): readonly UserMessage[] } }
@@ -122,6 +127,26 @@ describe('首版目录', () => {
     const decision = await injectCatalogStep(h.deps, h.payload, h.next)
 
     expect(catalogOf(decision)).toBeUndefined()
+  })
+
+  it('官方目录已存在时，首版也用替换框架覆盖它', async () => {
+    const h = harness({ history: [officialCatalog()] })
+
+    const decision = await injectCatalogStep(h.deps, h.payload, h.next)
+
+    const message = catalogOf(decision)
+    expect((message?.source as unknown as { update?: true }).update).toBe(true)
+    expect((message?.content[0] as { text: string }).text).toContain('替换')
+  })
+
+  it('官方已发布空目录且当前不注入时，仍发布空目录声明退役', async () => {
+    const h = harness({ history: [officialCatalog()], plan: { active: false } })
+
+    const decision = await injectCatalogStep(h.deps, h.payload, h.next)
+
+    const source = catalogOf(decision)?.source as unknown as { entries: CatalogEntry[]; update?: true }
+    expect(source.entries).toEqual([])
+    expect(source.update).toBe(true)
   })
 })
 

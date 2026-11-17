@@ -50,6 +50,7 @@ function createHost(options: { config?: CapabilityConfig; skills?: readonly { na
   tempDirs.push(stateDir)
 
   const listeners = new Map<string, ((...args: unknown[]) => unknown)[]>()
+  const onOptions: (unknown | undefined)[] = []
   const globalTools: ToolDefinition[] = []
   const shadowTools: ToolDefinition[] = []
   const agents: FakeAgent[] = []
@@ -123,10 +124,11 @@ function createHost(options: { config?: CapabilityConfig; skills?: readonly { na
       cleanups.push(cleanup)
       return cleanup
     },
-    on: (name: string, listener: (...args: unknown[]) => unknown) => {
+    on: (name: string, listener: (...args: unknown[]) => unknown, options?: unknown) => {
       const list = listeners.get(name) ?? []
       list.push(listener)
       listeners.set(name, list)
+      if (name === 'agent/pre-step') onOptions.push(options)
       return () => {
         const index = list.indexOf(listener)
         if (index >= 0) list.splice(index, 1)
@@ -194,6 +196,7 @@ function createHost(options: { config?: CapabilityConfig; skills?: readonly { na
     sections,
     webServers,
     snapshot,
+    onOptions,
     config: options.config ?? DEFAULT_CONFIG,
     createAgent() {
       return emit('agent/created', { agent })
@@ -218,6 +221,8 @@ describe('apply 装配', () => {
     expect(host.globalTools.map(tool => tool.name)).toContain('meta_search')
     expect(host.sections).toHaveLength(1)
     expect(host.webServers).toHaveLength(1)
+    // 目录 listener 必须在最外层，才能在官方 consumer 的退役消息之后追加。
+    expect(host.onOptions).toEqual([{ prepend: true }])
   })
 
   it('agent 创建时注册 shadow skill', () => {
