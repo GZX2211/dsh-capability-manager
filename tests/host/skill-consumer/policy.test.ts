@@ -1,0 +1,91 @@
+import { describe, expect, it } from 'vitest'
+import {
+  isCatalogInjected,
+  isSkillEnabled,
+  isSkillToolUsable,
+  SKILL_TOOL_NAME,
+} from '../../../src/host/skill-consumer/policy.ts'
+import { DEFAULT_CONFIG, type CapabilityConfig } from '../../../src/shared/config.ts'
+
+function config(patch: Partial<CapabilityConfig>): CapabilityConfig {
+  return { ...DEFAULT_CONFIG, ...patch }
+}
+
+describe('skill 工具名', () => {
+  it('与官方 skill 工具同名，才能 shadow 掉它', () => {
+    expect(SKILL_TOOL_NAME).toBe('skill')
+  })
+})
+
+describe('skill 工具可用性', () => {
+  function usable(patch: Partial<CapabilityConfig>, recalled: readonly string[] = []) {
+    return isSkillToolUsable({ config: config(patch), role: undefined, recalled: new Set(recalled) })
+  }
+
+  it('默认常驻，可用', () => {
+    expect(usable({})).toBe(true)
+  })
+
+  it('排除出池后不可用', () => {
+    expect(usable({ excluded: ['tool:skill'] })).toBe(false)
+  })
+
+  it('该角色黑名单里时不可用', () => {
+    const current = config({ blacklist: { router: ['tool:skill'], worker: [] } })
+
+    expect(isSkillToolUsable({ config: current, role: 'router', recalled: new Set() })).toBe(false)
+  })
+
+  it('取消常驻后不可用', () => {
+    expect(usable({ resident: ['tool:meta_search'] })).toBe(false)
+  })
+
+  it('取消常驻但本会话已召回后可用', () => {
+    expect(usable({ resident: ['tool:meta_search'] }, ['skill'])).toBe(true)
+  })
+})
+
+describe('Skill 能力池归属', () => {
+  it('池内且不在该角色黑名单里可用', () => {
+    expect(isSkillEnabled({ id: 'skill:office', config: DEFAULT_CONFIG, role: undefined })).toBe(true)
+  })
+
+  it('池外不可用', () => {
+    expect(isSkillEnabled({ id: 'skill:office', config: config({ excluded: ['skill:office'] }), role: undefined })).toBe(false)
+  })
+
+  it('该角色黑名单里不可用', () => {
+    const current = config({ blacklist: { router: ['skill:office'], worker: [] } })
+
+    expect(isSkillEnabled({ id: 'skill:office', config: current, role: 'router' })).toBe(false)
+  })
+
+  it('同名工具被排除不影响 Skill', () => {
+    expect(
+      isSkillEnabled({ id: 'skill:office', config: config({ excluded: ['tool:office'] }), role: undefined }),
+    ).toBe(true)
+  })
+
+  it('工具标识不是 Skill，永远不可用', () => {
+    expect(isSkillEnabled({ id: 'tool:office', config: DEFAULT_CONFIG, role: undefined })).toBe(false)
+  })
+
+  it('非法标识永远不可用', () => {
+    expect(isSkillEnabled({ id: 'office', config: DEFAULT_CONFIG, role: undefined })).toBe(false)
+  })
+})
+
+describe('Skill 目录注入时机', () => {
+  it('语义检索开启且 meta_search 可用时不注入：改用关键词召回 Skill', () => {
+    expect(isCatalogInjected({ metaSearchUsable: true, embeddingEnabled: true })).toBe(false)
+  })
+
+  it('语义检索关闭且 meta_search 可用时注入：Skill 不参与召回', () => {
+    expect(isCatalogInjected({ metaSearchUsable: true, embeddingEnabled: false })).toBe(true)
+  })
+
+  it('meta_search 不可用时注入：Skill 不能依赖召回', () => {
+    expect(isCatalogInjected({ metaSearchUsable: false, embeddingEnabled: false })).toBe(true)
+    expect(isCatalogInjected({ metaSearchUsable: false, embeddingEnabled: true })).toBe(true)
+  })
+})

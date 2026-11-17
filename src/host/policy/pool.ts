@@ -51,10 +51,53 @@ export function blacklistFor(config: CapabilityConfig, role: SessionRoleName | u
  * @returns 工具名集合；非工具标识被丢弃。
  */
 export function toolNames(ids: Iterable<CapabilityId>): Set<string> {
+  return namesOfKind(ids, 'tool')
+}
+
+/**
+ * 从标识集合里取出 Skill 名。
+ *
+ * 与 {@link toolNames} 对称：判定 Skill 是否可加载时不能把同名工具算进来。
+ *
+ * @param ids - 能力标识。
+ * @returns Skill 名集合；非 Skill 标识被丢弃。
+ */
+export function skillNames(ids: Iterable<CapabilityId>): Set<string> {
+  return namesOfKind(ids, 'skill')
+}
+
+function namesOfKind(ids: Iterable<CapabilityId>, kind: 'tool' | 'skill'): Set<string> {
   const names = new Set<string>()
   for (const id of ids) {
     const parsed = parseId(id)
-    if (parsed !== undefined && parsed.kind === 'tool') names.add(parsed.name)
+    if (parsed !== undefined && parsed.kind === kind) names.add(parsed.name)
   }
   return names
+}
+
+export interface ToolUsabilityInput {
+  /** 工具标识；非工具标识一律不可用。 */
+  id: CapabilityId
+  config: CapabilityConfig
+  /** 会话角色；`undefined` 表示未知，不应用黑名单。 */
+  role: SessionRoleName | undefined
+  /** 本会话已召回的工具名。 */
+  recalled: ReadonlySet<string>
+}
+
+/**
+ * 工具此刻是否对某个会话可用（§1.4 第 1–3 步）。
+ *
+ * 这是 `restrict` 名单与 agent 层 shadow 工具共用的判定：agent 层注册的工具
+ * 不受 `restrict` 约束，只有自己的 `when` 能落实池、黑名单与常驻资格。
+ *
+ * @param input - 工具标识、配置、角色与召回集合。
+ * @returns 可用时为 true。
+ */
+export function isToolUsable(input: ToolUsabilityInput): boolean {
+  const parsed = parseId(input.id)
+  if (parsed === undefined || parsed.kind !== 'tool') return false
+  if (!isInPool(input.id, input.config)) return false
+  if (blacklistFor(input.config, input.role).has(input.id)) return false
+  return residentSet(input.config).has(input.id) || input.recalled.has(parsed.name)
 }

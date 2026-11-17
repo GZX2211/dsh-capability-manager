@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blacklistFor, isInPool, residentSet, toolNames } from '../../../src/host/policy/pool.ts'
+import { blacklistFor, isInPool, isToolUsable, residentSet, toolNames } from '../../../src/host/policy/pool.ts'
 import { DEFAULT_CONFIG, type CapabilityConfig } from '../../../src/shared/config.ts'
 
 function config(patch: Partial<CapabilityConfig>): CapabilityConfig {
@@ -74,5 +74,47 @@ describe('标识到工具名的投影', () => {
 
   it('重复标识去重', () => {
     expect([...toolNames(['tool:read', 'tool:read'])]).toEqual(['read'])
+  })
+})
+
+describe('工具可用性判定', () => {
+  function usable(patch: Partial<CapabilityConfig>, id = 'tool:read', recalled: readonly string[] = []) {
+    return isToolUsable({ id, config: config(patch), role: undefined, recalled: new Set(recalled) })
+  }
+
+  it('常驻工具可用', () => {
+    expect(usable({ resident: ['tool:read'] })).toBe(true)
+  })
+
+  it('非常驻且未召回的工具不可用', () => {
+    expect(usable({ resident: ['tool:meta_search'] })).toBe(false)
+  })
+
+  it('非常驻但本会话已召回的工具可用', () => {
+    expect(usable({ resident: [] }, 'tool:read', ['read'])).toBe(true)
+  })
+
+  it('池外工具不可用，即使它在常驻里', () => {
+    expect(usable({ resident: ['tool:read'], excluded: ['tool:read'] })).toBe(false)
+  })
+
+  it('该角色黑名单里的工具不可用，即使它常驻', () => {
+    const current = config({ resident: ['tool:read'], blacklist: { router: ['tool:read'], worker: [] } })
+
+    expect(isToolUsable({ id: 'tool:read', config: current, role: 'router', recalled: new Set() })).toBe(false)
+  })
+
+  it('角色未知时不应用黑名单', () => {
+    const current = config({ resident: ['tool:read'], blacklist: { router: ['tool:read'], worker: [] } })
+
+    expect(isToolUsable({ id: 'tool:read', config: current, role: undefined, recalled: new Set() })).toBe(true)
+  })
+
+  it('Skill 标识不是工具，永远不可用', () => {
+    expect(usable({ resident: ['skill:office'] }, 'skill:office')).toBe(false)
+  })
+
+  it('非法标识永远不可用', () => {
+    expect(usable({ resident: ['tool:read'] }, 'read')).toBe(false)
   })
 })
