@@ -65,6 +65,7 @@ function createHost(options: {
   const sections: unknown[] = []
   const webServers: unknown[] = []
   const providers: unknown[] = []
+  const registeredSkills: { name: string; content: string; source: string }[] = []
   const skillList = options.skills ?? [{ name: 'alpha-skill', description: 'Alpha 的说明' }]
   const skillSummaries = skillList.map(skill => ({
     ...skill,
@@ -129,6 +130,10 @@ function createHost(options: {
     },
     registerProvider(create: (control: { invalidate: () => void }) => unknown) {
       providers.push(create({ invalidate: () => {} }))
+      return () => {}
+    },
+    register(skill: { name: string; content: string; source: string }) {
+      registeredSkills.push(skill)
       return () => {}
     },
   }
@@ -221,6 +226,7 @@ function createHost(options: {
     snapshot,
     stateDir,
     providers,
+    registeredSkills,
     onOptions,
     config: options.config ?? DEFAULT_CONFIG,
     createAgent() {
@@ -390,6 +396,16 @@ describe('apply 装配', () => {
 
     expect(snapshot.capabilities.find(capability => capability.id === 'tool:greet')).toMatchObject({ source: 'official' })
     expect(snapshot.capabilities.find(capability => capability.id === 'skill:greet')).toMatchObject({ source: 'custom' })
+  })
+
+  it('注册内置 capability-creator，正文带上真实状态目录', () => {
+    const host = createHost()
+
+    const creator = host.registeredSkills.find(skill => skill.name === 'capability-creator')
+
+    expect(creator).toBeDefined()
+    expect(creator?.content).toContain(host.stateDir)
+    expect(creator?.content).not.toContain('{{STATE_DIR}}')
   })
 })
 
