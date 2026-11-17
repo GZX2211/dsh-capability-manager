@@ -78,12 +78,22 @@ function createHost(options: {
   // definitions() 必须反映当前生效的 restriction：enforcement 会先解除自己的限制
   // 再吸收，而 seenTools 读的是限制生效后的可见集。
   let allowed: Set<string> | undefined
-  const allTools = () => [
-    toolSource('meta_search'),
-    toolSource('skill'),
-    toolSource('read'),
-    ...(options.extraTools ?? []).map(toolSource),
-  ]
+  // 工具全集包含运行时注册进来的工具：真实宿主里 definitions() 同样能看到它们。
+  const allTools = () => {
+    const base = [
+      toolSource('meta_search'),
+      toolSource('skill'),
+      toolSource('read'),
+      ...(options.extraTools ?? []).map(toolSource),
+    ]
+    const names = new Set(base.map(source => source.name))
+    for (const definition of globalTools) {
+      if (names.has(definition.name)) continue
+      names.add(definition.name)
+      base.push(toolSource(definition.name))
+    }
+    return base
+  }
 
   const agent: FakeAgent = {
     id: 'session-1',
@@ -164,7 +174,12 @@ function createHost(options: {
     tools: {
       register: (definition: ToolDefinition) => {
         globalTools.push(definition)
-        return () => {}
+        // 真实宿主在注册后同步发出 tools/change；这里照做，让吸收路径真的跑起来。
+        for (const listener of listeners.get('tools/change') ?? []) listener()
+        return () => {
+          const index = globalTools.indexOf(definition)
+          if (index >= 0) globalTools.splice(index, 1)
+        }
       },
       get: () => undefined,
     },
@@ -407,6 +422,38 @@ describe('apply 装配', () => {
     expect(creator?.content).toContain(host.stateDir)
     expect(creator?.content).not.toContain('{{STATE_DIR}}')
   })
+
+  it('验收：声明式工具写入后无需重启即可被 meta_search 召回并调用', async () => {
+    const host = createHost()
+    await host.createAgent()
+    writeSelfmadeTool(
+      host.stateDir,
+      'greet',
+      { name: 'greet', description: '打招呼' },
+      { command: process.execPath, args: ['-e', 'process.stdout.write("pong")'] },
+    )
+
+    // 读一次快照等价于「监听之外的那次兜底扫描」：注册 → tools/change → 吸收。
+    await host.snapshot()
+
+    const metaSearch = host.globalTools.find(tool => tool.name === 'meta_search')
+    if (metaSearch === undefined) throw new Error('meta_search not registered')
+    const recalled = await metaSearch.execute(
+      { names: 'greet' },
+      { agent: host.agent as never, signal: new AbortController().signal } as never,
+    ) as { tools: { name: string }[] }
+
+    expect(recalled.tools.map(tool => tool.name)).toEqual(['greet'])
+
+    const greet = host.globalTools.find(tool => tool.name === 'greet')
+    if (greet === undefined) throw new Error('greet not registered')
+    const value = await greet.execute(
+      {},
+      { agent: host.agent as never, signal: new AbortController().signal } as never,
+    )
+
+    expect(value).toEqual({ exitCode: 0, stdout: 'pong', stderr: '' })
+  })
 })
 
 /** 在状态目录里放一个声明式自建工具，走真实的扫描与注册路径。 */
@@ -414,6 +461,7 @@ function writeSelfmadeTool(
   stateDir: string,
   name: string,
   meta: { name: string; description: string },
+  shell: { command: string; args?: string[] } = { command: 'echo' },
 ): void {
   const dir = join(stateDir, 'tools', name)
   mkdirSync(dir, { recursive: true })
@@ -423,7 +471,7 @@ function writeSelfmadeTool(
       ...meta,
       parameters: { type: 'object', properties: {} },
       kind: 'shell',
-      shell: { command: 'echo' },
+      shell,
     }),
     'utf8',
   )
