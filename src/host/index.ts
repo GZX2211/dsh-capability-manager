@@ -71,19 +71,27 @@ export function apply(ctx: HostContext, config?: Config): void {
 
   // ---- meta_search ----
   const metaSearch = createMetaSearchTool({
-    candidates: agent => {
+    sources: agent => {
       const sessionId = agentIdOf(agent)
       const current = store.read()
-      return buildToolCandidates({
-        schemas: enforcement.schemasOf(),
-        present: enforcement.presentOf(sessionId),
-        config: current,
-        role: roles.roleOf(sessionId),
-      })
+      return {
+        tools: buildToolCandidates({
+          schemas: enforcement.schemasOf(),
+          present: enforcement.presentOf(sessionId),
+          config: current,
+          role: roles.roleOf(sessionId),
+        }),
+        // M2 的 Skill 候选与已见载荷在装配步骤接入；先保持 M1 的工具行为。
+        skills: new Map<string, { name: string; description: string }>(),
+        seenTools: toolPayloadsOf(visibleToolsOf(agent, log)),
+        seenSkills: new Set<string>(),
+        embeddingEnabled: current.embedding.enabled,
+        skillCatalogResident: false,
+      }
     },
-    seen: agent => toolPayloadsOf(visibleToolsOf(agent, log)),
     record: (sessionId, outcome) => {
-      recalled.add(sessionId, outcome.names)
+      recalled.add(sessionId, outcome.toolNames)
+      if (outcome.skillPayloads.length > 0) recalled.addSkills(sessionId, outcome.skillPayloads)
       // 立即重建：下一个 step 的 resolve() 会重新读 view，agent-loop 自动追加 tool-addition。
       enforcement.rebuild()
     },

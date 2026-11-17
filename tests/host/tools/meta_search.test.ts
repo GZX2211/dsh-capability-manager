@@ -4,7 +4,10 @@ import {
   parseMetaSearchArgs,
   renderMetaSearch,
   type MetaSearchDependencies,
+  type MetaSearchRecord,
 } from '../../../src/host/tools/meta_search/index.ts'
+import { skillPayload } from '../../../src/host/search/payload.ts'
+import type { MetaSearchSources } from '../../../src/host/search/index.ts'
 
 const readSchema = {
   name: 'read',
@@ -12,10 +15,23 @@ const readSchema = {
   parameters: { type: 'object', properties: { path: { type: 'string' } } },
 }
 
+const officeSkill = { name: 'office-docx', description: '创建与编辑 Word 文档' }
+
+function sources(patch: Partial<MetaSearchSources> = {}): MetaSearchSources {
+  return {
+    tools: new Map([['read', readSchema]]),
+    skills: new Map([[officeSkill.name, officeSkill]]),
+    seenTools: new Set(),
+    seenSkills: new Set(),
+    embeddingEnabled: false,
+    skillCatalogResident: false,
+    ...patch,
+  }
+}
+
 function dependencies(overrides: Partial<MetaSearchDependencies> = {}): MetaSearchDependencies {
   return {
-    candidates: () => new Map([['read', readSchema]]),
-    seen: () => new Set(),
+    sources: () => sources(),
     record: () => {},
     ...overrides,
   }
@@ -91,6 +107,26 @@ describe('执行', () => {
     expect(value.skills).toEqual([])
   })
 
+  it('语义通道返回 Skill 索引条目', async () => {
+    const tool = createMetaSearchTool(
+      dependencies({
+        sources: () =>
+          sources({
+            embeddingEnabled: true,
+            keywordHits: { tools: [], skills: [officeSkill.name] },
+          }),
+      }),
+    )
+
+    const value = (await tool.execute({ keywords: 'Word' }, exec(fakeAgent('s1')) as never)) as {
+      tools: unknown[]
+      skills: unknown[]
+    }
+
+    expect(value.tools).toEqual([])
+    expect(value.skills).toEqual([officeSkill])
+  })
+
   it('有结果时记录召回', async () => {
     const record = vi.fn()
     const tool = createMetaSearchTool(dependencies({ record }))
@@ -98,10 +134,31 @@ describe('执行', () => {
     await tool.execute({ names: 'read' }, exec(fakeAgent('s1')) as never)
 
     expect(record).toHaveBeenCalledTimes(1)
-    const [sessionId, outcome] = record.mock.calls[0] as [string, { names: string[]; payloads: string[] }]
+    const [sessionId, outcome] = record.mock.calls[0] as [string, MetaSearchRecord]
     expect(sessionId).toBe('s1')
-    expect(outcome.names).toEqual(['read'])
-    expect(outcome.payloads).toHaveLength(1)
+    expect(outcome.toolNames).toEqual(['read'])
+    expect(outcome.toolPayloads).toHaveLength(1)
+    expect(outcome.skillPayloads).toEqual([])
+  })
+
+  it('只返回 Skill 时也记录 Skill 载荷', async () => {
+    const record = vi.fn()
+    const tool = createMetaSearchTool(
+      dependencies({
+        record,
+        sources: () =>
+          sources({
+            embeddingEnabled: true,
+            keywordHits: { tools: [], skills: [officeSkill.name] },
+          }),
+      }),
+    )
+
+    await tool.execute({ keywords: 'Word' }, exec(fakeAgent('s1')) as never)
+
+    const [, outcome] = record.mock.calls[0] as [string, MetaSearchRecord]
+    expect(outcome.toolNames).toEqual([])
+    expect(outcome.skillPayloads).toEqual([skillPayload(officeSkill)])
   })
 
   it('没有结果时不记录', async () => {
@@ -118,9 +175,12 @@ describe('执行', () => {
     // 已经在上下文里而剔除——会话的工具已被收走，却永远召不回来。
     const tool = createMetaSearchTool(
       dependencies({
-        candidates: () => new Map([['pwsh', readSchema]]),
-        // 当前可见的只有常驻的 meta_search 自己。
-        seen: () => new Set(['{"name":"meta_search","description":"召回","parameters":{}}']),
+        sources: () =>
+          sources({
+            tools: new Map([['pwsh', readSchema]]),
+            // 当前可见的只有常驻的 meta_search 自己。
+            seenTools: new Set(['{"name":"meta_search","description":"召回","parameters":{}}']),
+          }),
       }),
     )
 
@@ -141,6 +201,15 @@ describe('渲染', () => {
     expect(text).toContain('读取文本文件')
     expect(text).toContain('"path"')
     expect(text).toContain('下一步')
+  })
+
+  it('Skill 段给出索引条目并指向 skill 工具', () => {
+    const blocks = renderMetaSearch(undefined, { tools: [], skills: [officeSkill], notes: [] })
+    const text = blocks.map(block => block.text).join('\n')
+
+    expect(text).toContain('Skill 索引')
+    expect(text).toContain('- `office-docx`：创建与编辑 Word 文档')
+    expect(text).toContain('skill')
   })
 
   it('没有结果时说明可能的原因', () => {

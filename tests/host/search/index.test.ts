@@ -1,41 +1,60 @@
 import { describe, expect, it } from 'vitest'
 import { runMetaSearch, type MetaSearchSources } from '../../../src/host/search/index.ts'
-import { toolPayload } from '../../../src/host/search/payload.ts'
+import { skillPayload, toolPayload } from '../../../src/host/search/payload.ts'
 
 function schema(name: string, description = `${name} 的说明`) {
   return { name, description, parameters: { type: 'object', properties: { p: { type: 'string' } } } }
 }
 
-function sources(names: readonly string[], seen: readonly string[] = []): MetaSearchSources {
+function skillEntry(name: string, description = `${name} 的说明`) {
+  return { name, description }
+}
+
+interface SourcesOptions {
+  tools?: readonly string[]
+  skills?: readonly string[]
+  seenTools?: readonly string[]
+  seenSkills?: readonly string[]
+  embeddingEnabled?: boolean
+  skillCatalogResident?: boolean
+  keywordHits?: { tools: readonly string[]; skills: readonly string[] }
+}
+
+function sources(options: SourcesOptions = {}): MetaSearchSources {
   return {
-    candidates: new Map(names.map(name => [name, schema(name)])),
-    seen: new Set(seen),
+    tools: new Map((options.tools ?? ['read', 'write']).map(name => [name, schema(name)])),
+    skills: new Map((options.skills ?? []).map(name => [name, skillEntry(name)])),
+    seenTools: new Set(options.seenTools ?? []),
+    seenSkills: new Set(options.seenSkills ?? []),
+    embeddingEnabled: options.embeddingEnabled ?? false,
+    skillCatalogResident: options.skillCatalogResident ?? false,
+    ...options.keywordHits === undefined ? {} : { keywordHits: options.keywordHits },
   }
 }
 
 describe('名称通道', () => {
   it('命中时返回完整 schema', () => {
-    const outcome = runMetaSearch(sources(['read', 'write']), { names: 'read' })
+    const outcome = runMetaSearch(sources(), { names: 'read' })
 
     expect(outcome.tools).toEqual([schema('read')])
-    expect(outcome.names).toEqual(['read'])
+    expect(outcome.toolNames).toEqual(['read'])
   })
 
   it('名称组一次召回多个', () => {
-    const outcome = runMetaSearch(sources(['read', 'write', 'edit']), { names: 'read|write' })
+    const outcome = runMetaSearch(sources(), { names: 'read|write' })
 
-    expect(outcome.names).toEqual(['read', 'write'])
+    expect(outcome.toolNames).toEqual(['read', 'write'])
   })
 
   it('未命中时返回空且不加说明', () => {
-    const outcome = runMetaSearch(sources(['read']), { names: 'nothere' })
+    const outcome = runMetaSearch(sources(), { names: 'nothere' })
 
     expect(outcome.tools).toEqual([])
     expect(outcome.notes).toEqual([])
   })
 
   it('非法正则只让这条通道失效，并给出说明', () => {
-    const outcome = runMetaSearch(sources(['read']), { names: '[a' })
+    const outcome = runMetaSearch(sources(), { names: '[a' })
 
     expect(outcome.tools).toEqual([])
     expect(outcome.notes).toHaveLength(1)
@@ -43,93 +62,229 @@ describe('名称通道', () => {
   })
 
   it('保持候选顺序', () => {
-    const outcome = runMetaSearch(sources(['write', 'read', 'glob']), { names: 'read|write|glob' })
+    const outcome = runMetaSearch(sources({ tools: ['write', 'read', 'glob'] }), {
+      names: 'read|write|glob',
+    })
 
-    expect(outcome.names).toEqual(['write', 'read', 'glob'])
+    expect(outcome.toolNames).toEqual(['write', 'read', 'glob'])
+  })
+
+  it('只召回工具：同名 Skill 不会被名称通道返回', () => {
+    const outcome = runMetaSearch(sources({ tools: ['read'], skills: ['read'] }), { names: 'read' })
+
+    expect(outcome.toolNames).toEqual(['read'])
+    expect(outcome.skills).toEqual([])
+  })
+
+  it('名称只命中 Skill 时说明 Skill 不走名称通道', () => {
+    const outcome = runMetaSearch(
+      sources({ tools: [], skills: ['office-docx'], skillCatalogResident: false }),
+      { names: 'office-docx' },
+    )
+
+    expect(outcome.tools).toEqual([])
+    expect(outcome.skills).toEqual([])
+    expect(outcome.notes.some(note => note.includes('names 通道只召回工具'))).toBe(true)
+  })
+
+  it('目录已注入时说明无需召回，直接用 skill 工具加载', () => {
+    const outcome = runMetaSearch(
+      sources({ tools: [], skills: ['office-docx'], skillCatalogResident: true }),
+      { names: 'office-docx' },
+    )
+
+    expect(outcome.notes.some(note => note.includes('已在当前上下文中完整可见'))).toBe(true)
   })
 })
 
 describe('关键词通道', () => {
   it('向量检索未开启时被忽略并给出说明', () => {
-    const outcome = runMetaSearch(sources(['read']), { keywords: '读取文件' })
+    const outcome = runMetaSearch(sources(), { keywords: '读取文件' })
 
     expect(outcome.tools).toEqual([])
     expect(outcome.notes.some(note => note.includes('向量检索'))).toBe(true)
   })
 
-  it('同时给出 names 时 names 通道照常工作', () => {
-    const outcome = runMetaSearch(sources(['read']), { names: 'read', keywords: '读取文件' })
+  it('向量检索开启但语义通道未就绪时给出说明', () => {
+    const outcome = runMetaSearch(sources({ embeddingEnabled: true }), { keywords: '读取文件' })
 
-    expect(outcome.names).toEqual(['read'])
-    expect(outcome.notes.some(note => note.includes('向量检索'))).toBe(true)
+    expect(outcome.notes.some(note => note.includes('语义检索暂不可用'))).toBe(true)
+  })
+
+  it('语义命中同时返回工具与 Skill', () => {
+    const outcome = runMetaSearch(
+      sources({
+        embeddingEnabled: true,
+        tools: ['read'],
+        skills: ['office-docx'],
+        keywordHits: { tools: ['read'], skills: ['office-docx'] },
+      }),
+      { keywords: '读取 Word' },
+    )
+
+    expect(outcome.toolNames).toEqual(['read'])
+    expect(outcome.skills).toEqual([skillEntry('office-docx')])
+    expect(outcome.skillPayloads).toEqual([skillPayload(skillEntry('office-docx'))])
+  })
+
+  it('语义命中按给定顺序返回，未知名称被忽略', () => {
+    const outcome = runMetaSearch(
+      sources({
+        embeddingEnabled: true,
+        tools: ['write', 'read'],
+        skills: ['alpha', 'beta'],
+        keywordHits: { tools: ['read', 'missing', 'write'], skills: ['beta', 'missing', 'alpha'] },
+      }),
+      { keywords: '写入' },
+    )
+
+    expect(outcome.toolNames).toEqual(['read', 'write'])
+    expect(outcome.skills.map(skill => skill.name)).toEqual(['beta', 'alpha'])
+  })
+
+  it('重复的语义命中只返回一次', () => {
+    const outcome = runMetaSearch(
+      sources({
+        embeddingEnabled: true,
+        tools: ['read'],
+        keywordHits: { tools: ['read', 'read'], skills: [] },
+      }),
+      { keywords: '读取' },
+    )
+
+    expect(outcome.toolNames).toEqual(['read'])
+  })
+
+  it('名称命中排在语义命中之前，且不重复', () => {
+    const outcome = runMetaSearch(
+      sources({
+        embeddingEnabled: true,
+        tools: ['write', 'read'],
+        keywordHits: { tools: ['read', 'write'], skills: [] },
+      }),
+      { names: 'write', keywords: '读取' },
+    )
+
+    expect(outcome.toolNames).toEqual(['write', 'read'])
   })
 })
 
 describe('载荷级去重', () => {
   it('已出现过的工具被剔除', () => {
-    const outcome = runMetaSearch(sources(['read'], [toolPayload(schema('read'))]), { names: 'read' })
+    const outcome = runMetaSearch(sources({ seenTools: [toolPayload(schema('read'))] }), { names: 'read' })
 
     expect(outcome.tools).toEqual([])
-    expect(outcome.names).toEqual([])
+    expect(outcome.toolNames).toEqual([])
   })
 
   it('剔除后其余项照常返回', () => {
-    const outcome = runMetaSearch(sources(['read', 'write'], [toolPayload(schema('read'))]), {
-      names: 'read|write',
-    })
+    const outcome = runMetaSearch(
+      sources({ tools: ['read', 'write'], seenTools: [toolPayload(schema('read'))] }),
+      { names: 'read|write' },
+    )
 
-    expect(outcome.names).toEqual(['write'])
+    expect(outcome.toolNames).toEqual(['write'])
   })
 
   it('同名但描述变化的工具算新载荷，会再次出现', () => {
     const stale = toolPayload({ ...schema('read'), description: '旧描述' })
-    const outcome = runMetaSearch(sources(['read'], [stale]), { names: 'read' })
+    const outcome = runMetaSearch(sources({ tools: ['read'], seenTools: [stale] }), { names: 'read' })
 
-    expect(outcome.names).toEqual(['read'])
+    expect(outcome.toolNames).toEqual(['read'])
+  })
+
+  it('已出现过的 Skill 载荷被剔除', () => {
+    const seen = skillPayload(skillEntry('office-docx'))
+    const outcome = runMetaSearch(
+      sources({
+        embeddingEnabled: true,
+        skills: ['office-docx'],
+        seenSkills: [seen],
+        keywordHits: { tools: [], skills: ['office-docx'] },
+      }),
+      { keywords: 'Word' },
+    )
+
+    expect(outcome.skills).toEqual([])
+  })
+
+  it('工具载荷与 Skill 载荷不互相判重', () => {
+    const outcome = runMetaSearch(
+      sources({
+        embeddingEnabled: true,
+        tools: ['office-docx'],
+        skills: ['office-docx'],
+        seenTools: [toolPayload(schema('office-docx'))],
+        seenSkills: [skillPayload(skillEntry('office-docx'))],
+        keywordHits: { tools: ['office-docx'], skills: ['office-docx'] },
+      }),
+      { keywords: '办公' },
+    )
+
+    expect(outcome.tools).toEqual([])
+    expect(outcome.skills).toEqual([])
   })
 })
 
 describe('条数上限', () => {
   it('默认最多 20 条', () => {
     const names = Array.from({ length: 30 }, (_, index) => `tool${String(index).padStart(2, '0')}`)
-    const outcome = runMetaSearch(sources(names), { names: 'tool' })
+    const outcome = runMetaSearch(sources({ tools: names }), { names: 'tool' })
 
     expect(outcome.tools).toHaveLength(20)
   })
 
   it('上限是 50 条', () => {
     const names = Array.from({ length: 80 }, (_, index) => `tool${String(index).padStart(2, '0')}`)
-    const outcome = runMetaSearch(sources(names), { names: 'tool', limit: 999 })
+    const outcome = runMetaSearch(sources({ tools: names }), { names: 'tool', limit: 999 })
 
     expect(outcome.tools).toHaveLength(50)
   })
 
   it('请求更少条数时按请求截断', () => {
-    const outcome = runMetaSearch(sources(['read', 'write', 'edit']), { names: 'read|write|edit', limit: 2 })
+    const outcome = runMetaSearch(sources({ tools: ['read', 'write', 'edit'] }), {
+      names: 'read|write|edit',
+      limit: 2,
+    })
 
-    expect(outcome.names).toEqual(['read', 'write'])
+    expect(outcome.toolNames).toEqual(['read', 'write'])
   })
 
   it('非正数与非法数字回落到默认值', () => {
     const names = Array.from({ length: 25 }, (_, index) => `tool${String(index).padStart(2, '0')}`)
 
-    expect(runMetaSearch(sources(names), { names: 'tool', limit: 0 }).tools).toHaveLength(20)
-    expect(runMetaSearch(sources(names), { names: 'tool', limit: Number.NaN }).tools).toHaveLength(20)
+    expect(runMetaSearch(sources({ tools: names }), { names: 'tool', limit: 0 }).tools).toHaveLength(20)
+    expect(runMetaSearch(sources({ tools: names }), { names: 'tool', limit: Number.NaN }).tools).toHaveLength(20)
+  })
+
+  it('工具优先占用额度，Skill 只吃剩余条数', () => {
+    const outcome = runMetaSearch(
+      sources({
+        embeddingEnabled: true,
+        tools: ['a', 'b', 'c'],
+        skills: ['s1', 's2'],
+        keywordHits: { tools: ['a', 'b', 'c'], skills: ['s1', 's2'] },
+      }),
+      { keywords: '查询', limit: 4 },
+    )
+
+    expect(outcome.toolNames).toHaveLength(3)
+    expect(outcome.skills).toHaveLength(1)
   })
 
   it('载荷与名称同步截断，长度一致', () => {
     const names = Array.from({ length: 5 }, (_, index) => `tool${String(index)}`)
-    const outcome = runMetaSearch(sources(names), { names: 'tool', limit: 3 })
+    const outcome = runMetaSearch(sources({ tools: names }), { names: 'tool', limit: 3 })
 
-    expect(outcome.names).toHaveLength(3)
-    expect(outcome.payloads).toHaveLength(3)
+    expect(outcome.toolNames).toHaveLength(3)
+    expect(outcome.toolPayloads).toHaveLength(3)
     expect(outcome.tools).toHaveLength(3)
   })
 })
 
 describe('没有检索条件', () => {
   it('什么都不给时返回空并说明没有执行召回', () => {
-    const outcome = runMetaSearch(sources(['read']), {})
+    const outcome = runMetaSearch(sources(), {})
 
     expect(outcome.tools).toEqual([])
     expect(outcome.notes).toHaveLength(1)
@@ -137,17 +292,9 @@ describe('没有检索条件', () => {
   })
 
   it('空白字符串等同于没给', () => {
-    const outcome = runMetaSearch(sources(['read']), { names: '   ', keywords: '  ' })
+    const outcome = runMetaSearch(sources(), { names: '   ', keywords: '  ' })
 
     expect(outcome.tools).toEqual([])
     expect(outcome.notes).toHaveLength(1)
-  })
-})
-
-describe('Skill 通道', () => {
-  it('M1 阶段恒返回空列表', () => {
-    const outcome = runMetaSearch(sources(['read']), { names: 'read' })
-
-    expect(outcome.skills).toEqual([])
   })
 })

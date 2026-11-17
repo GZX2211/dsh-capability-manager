@@ -4,9 +4,9 @@
 // 检索逻辑全部在 `search/`，这里只做 Tool-facing 适配。
 
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import type { MetaSearchRequest } from '../../search/index.ts'
+import type { MetaSearchRequest, MetaSearchSources } from '../../search/index.ts'
 import { runMetaSearch } from '../../search/index.ts'
-import type { ToolPayloadSource } from '../../search/payload.ts'
+import type { SkillPayloadSource, ToolPayloadSource } from '../../search/payload.ts'
 
 export const META_SEARCH_TOOL_NAME = 'meta_search'
 
@@ -21,8 +21,8 @@ export const META_SEARCH_DESCRIPTION = `召回当前会话可用的工具与 Ski
 何时调用：你不确定有哪些工具或 Skill 可用时；或已知能力名但当前看不到它的完整定义时。
 
 参数：
-- names：准确名称或名称组（支持正则片段，如 "read|write|edit"），按名称匹配，永远可用，支持批量。
-- keywords：自然语言关键词，按语义相似度召回，仅在开启向量检索时生效。
+- names：准确名称或名称组（支持正则片段，如 "read|write|edit"），按名称匹配，永远可用，支持批量。只召回工具；Skill 名称不在这个通道里。
+- keywords：自然语言关键词，按语义相似度召回工具与 Skill，仅在开启向量检索时生效。
 
 返回：tools 为可直接调用的完整 schema；skills 为索引条目（name + description），
 正文需再调用 skill 工具加载。返回为空表示这些能力已在当前上下文中，或不在能力池内。
@@ -40,31 +40,31 @@ export const META_SEARCH_PARAMETERS = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    names: { type: 'string', description: '名称组，支持 | 分隔的正则片段' },
-    keywords: { type: 'string', description: '自然语言关键词' },
+    names: { type: 'string', description: '名称组，支持 | 分隔的正则片段；只召回工具' },
+    keywords: { type: 'string', description: '自然语言关键词；开启向量检索时召回工具与 Skill' },
     limit: { type: 'number', description: '最多返回条数，默认 20，上限 50' },
   },
 } as const
 
-/** 工具结果：M1 阶段 `skills` 恒为空，字段保留以免 M2 改契约。 */
+/** 工具结果：工具给完整 schema，Skill 只给索引条目。 */
 interface MetaSearchValue {
   tools: ToolPayloadSource[]
-  skills: { name: string; description: string }[]
+  skills: SkillPayloadSource[]
   notes: string[]
 }
 
+/** 一次召回需要调用方记账的载荷。 */
+export interface MetaSearchRecord {
+  toolNames: string[]
+  toolPayloads: string[]
+  skillPayloads: string[]
+}
+
 export interface MetaSearchDependencies {
-  /** 该 agent 此刻可召回的工具：已按池、黑名单与存在性过滤。 */
-  candidates: (agent: unknown) => ReadonlyMap<string, ToolPayloadSource>
-  /**
-   * 该 agent 此刻**已经能在上下文里看到**的工具载荷。
-   *
-   * 必须是当前可见集，不是会话历史：历史里记着工具被收走之前的定义，
-   * 用它当基准会让每一次召回都被判成「已经出现过」而剔除。
-   */
-  seen: (agent: unknown) => ReadonlySet<string>
-  /** 记录本次召回并重建可见集；只在真的返回了工具时调用。 */
-  record: (sessionId: string, outcome: { names: string[]; payloads: string[] }) => void
+  /** 该 agent 此刻可召回的工具与 Skill，以及两类已见载荷与模式开关。 */
+  sources: (agent: unknown) => MetaSearchSources
+  /** 记录本次召回并重建可见集；只在真的返回了能力时调用。 */
+  record: (sessionId: string, outcome: MetaSearchRecord) => void
 }
 
 /**
@@ -156,12 +156,13 @@ export function createMetaSearchTool(deps: MetaSearchDependencies): ToolDefiniti
         throw new Error('meta_search 只能在会话内调用：当前没有发起调用的 agent')
       }
       const session = agent.session
-      const outcome = runMetaSearch(
-        { candidates: deps.candidates(agent), seen: deps.seen(agent) },
-        parseMetaSearchArgs(rawArgs),
-      )
-      if (outcome.names.length > 0) {
-        deps.record(session.id, { names: outcome.names, payloads: outcome.payloads })
+      const outcome = runMetaSearch(deps.sources(agent), parseMetaSearchArgs(rawArgs))
+      if (outcome.toolNames.length > 0 || outcome.skillPayloads.length > 0) {
+        deps.record(session.id, {
+          toolNames: outcome.toolNames,
+          toolPayloads: outcome.toolPayloads,
+          skillPayloads: outcome.skillPayloads,
+        })
       }
       return { tools: outcome.tools, skills: outcome.skills, notes: outcome.notes }
     },

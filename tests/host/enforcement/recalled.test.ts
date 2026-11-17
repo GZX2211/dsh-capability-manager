@@ -128,3 +128,49 @@ describe('召回集合：运行期累加', () => {
     expect(store.namesOf(broken)).toEqual(new Set(['write']))
   })
 })
+
+describe('Skill 召回载荷', () => {
+  it('初始为空集合', () => {
+    const store = new RecalledStore()
+
+    expect(store.skillPayloadsOf('s1')).toEqual(new Set())
+  })
+
+  it('加入的 Skill 载荷立刻可见', () => {
+    const store = new RecalledStore()
+
+    store.addSkills('s1', ['a\u0000说明'])
+
+    expect(store.skillPayloadsOf('s1')).toEqual(new Set(['a\u0000说明']))
+  })
+
+  it('addSkills 报告是否真的带来了新载荷', () => {
+    const store = new RecalledStore()
+
+    expect(store.addSkills('s1', ['a\u0000说明'])).toBe(true)
+    expect(store.addSkills('s1', ['a\u0000说明'])).toBe(false)
+    expect(store.addSkills('s1', [])).toBe(false)
+  })
+
+  it('Skill 载荷与工具召回集合互不污染', () => {
+    const store = new RecalledStore()
+
+    store.add('s1', ['read'])
+    store.addSkills('s1', ['a\u0000说明'])
+
+    expect(store.namesOf(fakeSession('s1'))).toEqual(new Set(['read']))
+    expect(store.skillPayloadsOf('s1')).toEqual(new Set(['a\u0000说明']))
+  })
+
+  it('forget 同时清空工具与 Skill 的召回记录', () => {
+    const store = new RecalledStore()
+    const session = fakeSession('s1', ['read'])
+    store.addSkills('s1', ['a\u0000说明'])
+    store.namesOf(session)
+
+    store.forget('s1')
+
+    expect(store.namesOf(session)).toEqual(new Set(['read']))
+    expect(store.skillPayloadsOf('s1')).toEqual(new Set())
+  })
+})

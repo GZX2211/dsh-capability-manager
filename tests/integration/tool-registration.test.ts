@@ -38,8 +38,14 @@ function defineTool(name: string) {
 
 function metaSearch() {
   return createMetaSearchTool({
-    candidates: () => new Map(),
-    seen: () => new Set(),
+    sources: () => ({
+      tools: new Map(),
+      skills: new Map(),
+      seenTools: new Set(),
+      seenSkills: new Set(),
+      embeddingEnabled: false,
+      skillCatalogResident: false,
+    }),
     record: () => {},
   })
 }

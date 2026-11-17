@@ -27,29 +27,28 @@ export class RecalledStore {
   private readonly cache = new Map<string, Set<string>>()
   /** 尚未重建过的会话也允许先累加，重建时取并集。 */
   private readonly pending = new Map<string, Set<string>>()
+  /**
+   * 每会话已召回过的 Skill 载荷。
+   *
+   * 与工具名分开存：工具名喂给 `computeAllow`，Skill 载荷只用于召回去重。
+   * 技能载荷无法从 `toolHistory()` 重建，因此恢复会话后只保留运行期累加的部分。
+   */
+  private readonly skillCache = new Map<string, Set<string>>()
+  private readonly skillPending = new Map<string, Set<string>>()
 
   /**
-   * 记录一次召回。
+   * 记录一次工具召回。
    *
    * @param sessionId - 会话身份。
    * @param names - 本次召回到达的工具名。
    * @returns 是否真的带来了新名字；没有新名字时调用方可以跳过重建。
    */
   add(sessionId: string, names: Iterable<string>): boolean {
-    const target = this.cache.get(sessionId) ?? this.pending.get(sessionId) ?? new Set<string>()
-    let changed = false
-    for (const name of names) {
-      if (target.has(name)) continue
-      target.add(name)
-      changed = true
-    }
-    if (this.cache.has(sessionId)) this.cache.set(sessionId, target)
-    else this.pending.set(sessionId, target)
-    return changed
+    return append(this.cache, this.pending, sessionId, names)
   }
 
   /**
-   * 读取会话的召回集合。
+   * 读取会话的工具召回集合。
    *
    * 首次调用从会话日志重建，之后直接返回缓存。
    *
@@ -67,12 +66,60 @@ export class RecalledStore {
     return names
   }
 
-  /** 丢弃一个会话的缓存；下次读取会重新从日志重建。 */
+  /**
+   * 记录一次 Skill 召回。
+   *
+   * @param sessionId - 会话身份。
+   * @param payloads - 本次返回的 Skill 载荷。
+   * @returns 是否真的带来了新载荷。
+   */
+  addSkills(sessionId: string, payloads: Iterable<string>): boolean {
+    return append(this.skillCache, this.skillPending, sessionId, payloads)
+  }
+
+  /**
+   * 读取会话已召回的 Skill 载荷。
+   *
+   * 不在会话日志里重建：工具结果只保留渲染文本，不保留原始索引条目；恢复后
+   * 最多重复返回一次，不会把未出现过的 Skill 误判成已出现。
+   *
+   * @param sessionId - 会话身份。
+   * @returns 只读集合；调用方不得修改。
+   */
+  skillPayloadsOf(sessionId: string): ReadonlySet<string> {
+    return this.skillCache.get(sessionId) ?? this.skillPending.get(sessionId) ?? EMPTY_PAYLOADS
+  }
+
+  /** 丢弃一个会话的缓存；下次读取工具集合时会重新从日志重建。 */
   forget(sessionId: string): void {
     this.cache.delete(sessionId)
     this.pending.delete(sessionId)
+    this.skillCache.delete(sessionId)
+    this.skillPending.delete(sessionId)
   }
 }
+
+/** 累加到缓存或待合并表；返回是否出现了新值。 */
+function append(
+  cache: Map<string, Set<string>>,
+  pending: Map<string, Set<string>>,
+  sessionId: string,
+  values: Iterable<string>,
+): boolean {
+  const target = cache.get(sessionId) ?? pending.get(sessionId) ?? new Set<string>()
+  let changed = false
+  for (const value of values) {
+    if (target.has(value)) continue
+    target.add(value)
+    changed = true
+  }
+  if (cache.has(sessionId)) cache.set(sessionId, target)
+  else pending.set(sessionId, target)
+  return changed
+}
+
+/** 空载荷集合：没有召回记录的会话复用同一个只读实例。 */
+const EMPTY_PAYLOADS: ReadonlySet<string> = new Set()
 
 /**
  * 从会话日志还原召回集合。
