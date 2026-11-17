@@ -13,7 +13,9 @@ import {
   ROUTES,
   type ConfigPatch,
   type ConfigWriteResponse,
+  type CreateSkillResponse,
   type ErrorResponse,
+  type RevealResponse,
   type SnapshotResponse,
 } from '../../shared/api.ts'
 
@@ -48,6 +50,35 @@ export async function writeConfig(patch: ConfigPatch): Promise<ConfigWriteRespon
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(patch),
   })) as ConfigWriteResponse
+}
+
+/**
+ * 手动创建一个自建 Skill。
+ *
+ * @param revision - 读取快照时的 revision；服务端据此判定并发冲突。
+ * @returns 新 revision 与刚创建的能力条目。
+ * @throws {ApiError} `revision-conflict`、`create-failed`。
+ */
+export async function createSkill(revision: number): Promise<CreateSkillResponse> {
+  return (await requestJson(ROUTES.createSkill, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ revision }),
+  })) as CreateSkillResponse
+}
+
+/**
+ * 在系统文件管理器里打开一个自建能力的目录。
+ *
+ * @param id - `tool:<name>` 或 `skill:<name>`。
+ * @throws {ApiError} `not-owned`、`reveal-failed`。
+ */
+export async function revealCapability(id: string): Promise<RevealResponse> {
+  return (await requestJson(ROUTES.reveal, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id }),
+  })) as RevealResponse
 }
 
 async function requestJson(path: string, init: RequestInit = {}): Promise<unknown> {

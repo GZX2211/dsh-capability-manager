@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import type { CapabilityKind } from '../../shared/capability.ts'
 import { ApiError } from '../lib/http.ts'
 import { filterCapabilities, type SourceFilterValue } from '../lib/filter.ts'
-import { countByPool, partitionByPool, sortResidentFirst } from '../lib/transfer.ts'
+import { countByPool, partitionByPool, sortPinnedFirst, sortResidentFirst } from '../lib/transfer.ts'
 import { useSnapshot } from '../hooks/useSnapshot.ts'
 import { useSplitRatio } from '../hooks/useSplitRatio.ts'
 import { HelpDialog } from '../components/HelpDialog.tsx'
@@ -53,12 +53,16 @@ export function Manager({ t, onCreateWithAgent }: ManagerProps) {
   const [query, setQuery] = useState('')
   const [helpOpen, setHelpOpen] = useState(false)
   const [createFailed, setCreateFailed] = useState(false)
+  /** 刚创建的能力：第一次出现时置顶，否则会按字母序沉进排出池深处。 */
+  const [createdId, setCreatedId] = useState<string | undefined>(undefined)
 
   const describe = useCallback(
     (error: unknown): string => {
       if (error instanceof ApiError) {
         if (error.code === 'revision-conflict') return t('revisionConflict')
         if (error.code === 'bad-request' || error.code === 'unknown-capability') return t('writeForbidden')
+        if (error.code === 'create-failed') return t('createFailed')
+        if (error.code === 'not-owned' || error.code === 'reveal-failed') return t('openFolderFailed')
         return error.message
       }
       return error instanceof Error ? error.message : String(error)
@@ -87,11 +91,19 @@ export function Manager({ t, onCreateWithAgent }: ManagerProps) {
   )
 
   const config = snapshot.snapshot?.config
-  // 常驻是显式配置，排在能力池最前；字母序在它之下。
+  // 常驻是显式配置，排在能力池最前；刚创建的自建 Skill 排在排出池最前。
+  // 两者共用同一套「置顶」逻辑，只是置顶来源不同。
+  const pinnedExcluded = useMemo(
+    () => createdId !== undefined && config?.excluded.includes(createdId) === true ? [createdId] : [],
+    [createdId, config],
+  )
   const partition = useMemo(() => {
     const split = partitionByPool(visible, config?.excluded ?? [])
-    return { ...split, pooled: sortResidentFirst(split.pooled, config?.resident ?? []) }
-  }, [visible, config])
+    return {
+      pooled: sortResidentFirst(split.pooled, config?.resident ?? []),
+      excluded: sortPinnedFirst(split.excluded, pinnedExcluded),
+    }
+  }, [visible, config, pinnedExcluded])
   const counts = useMemo(() => countByPool(visible, config?.excluded ?? []), [visible, config])
   // 搜索 / 筛选无命中与「某一侧恰好为空」是两种状态：空态文案不能混用。
   const nothingMatches = counts.total === 0
@@ -109,6 +121,22 @@ export function Manager({ t, onCreateWithAgent }: ManagerProps) {
     (id: string, next: boolean) => void snapshot.mutate({ op: 'set-resident', id, value: next }),
     [snapshot.mutate],
   )
+  const reveal = useCallback((id: string) => void snapshot.reveal(id), [snapshot.reveal])
+
+  /**
+   * 手动创建：成功之后把视线带到新行。
+   *
+   * 新能力落在排出池，因此必须切到 Skill 页并清掉筛选与搜索词；
+   * 否则「创建成功但列表里没有」和失败在界面上无法区分。
+   */
+  const createSkill = useCallback(async (): Promise<void> => {
+    const created = await snapshot.createSkill()
+    if (created === undefined) return
+    setTab('skills')
+    setSource('all')
+    setQuery('')
+    setCreatedId(created.id)
+  }, [snapshot.createSkill])
 
   const pane = (side: 'excluded' | 'pooled') => ({
     count: side === 'excluded' ? counts.excluded : counts.pooled,
@@ -145,6 +173,7 @@ export function Manager({ t, onCreateWithAgent }: ManagerProps) {
             disabled={snapshot.saving}
             t={t}
             onCreateWithAgent={() => setCreateFailed(!onCreateWithAgent())}
+            onCreateSkill={() => { void createSkill() }}
           />
         </div>
       </div>
@@ -217,6 +246,7 @@ export function Manager({ t, onCreateWithAgent }: ManagerProps) {
                   onAdd={addToPool}
                   onRemove={removeFromPool}
                   onToggleResident={toggleResident}
+                  onReveal={reveal}
                   t={t}
                 />
 
@@ -244,6 +274,7 @@ export function Manager({ t, onCreateWithAgent }: ManagerProps) {
                   onAdd={addToPool}
                   onRemove={removeFromPool}
                   onToggleResident={toggleResident}
+                  onReveal={reveal}
                   t={t}
                 />
               </div>

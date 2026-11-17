@@ -9,9 +9,16 @@
 // 轮询会让悬停中的开关在脚下被重绘。
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CapabilityEntry } from '../../shared/capability.ts'
 import type { CapabilityConfig } from '../../shared/config.ts'
 import type { ConfigPatch, ConfigPatchInput, SnapshotResponse } from '../../shared/api.ts'
-import { ApiError, fetchSnapshot, writeConfig } from '../lib/http.ts'
+import {
+  ApiError,
+  createSkill as requestCreateSkill,
+  fetchSnapshot,
+  revealCapability,
+  writeConfig,
+} from '../lib/http.ts'
 
 export interface SnapshotState {
   snapshot?: SnapshotResponse
@@ -30,6 +37,10 @@ export interface SnapshotHandle extends SnapshotState {
   refresh: () => void
   /** 提交一次配置改动；成功后自动刷新。 */
   mutate: (patch: ConfigPatchInput) => Promise<void>
+  /** 手动创建一个自建 Skill；成功后刷新快照并返回新条目。 */
+  createSkill: () => Promise<CapabilityEntry | undefined>
+  /** 在系统文件管理器里打开某个自建能力的目录。 */
+  reveal: (id: string) => Promise<void>
 }
 
 /**
@@ -88,7 +99,40 @@ export function useSnapshot(describe: (error: unknown) => string): SnapshotHandl
     [describe, load],
   )
 
-  return { ...state, refresh: () => void load(), mutate }
+  const createSkill = useCallback(async (): Promise<CapabilityEntry | undefined> => {
+    setState(previous => ({ ...previous, saving: true, writeError: undefined, notice: undefined }))
+    try {
+      const created = await requestCreateSkill(revision.current)
+      revision.current = created.revision
+      const snapshot = await fetchSnapshot()
+      if (disposed.current) return created.capability
+      revision.current = snapshot.revision
+      setState({ snapshot, saving: false })
+      return created.capability
+    } catch (error) {
+      if (disposed.current) return undefined
+      if (error instanceof ApiError && error.code === 'revision-conflict') {
+        // 与写配置同一条恢复路径：重新读一次，让用户基于新状态重来。
+        setState(previous => ({ ...previous, saving: false, notice: describe(error) }))
+        await load()
+        return undefined
+      }
+      setState(previous => ({ ...previous, saving: false, writeError: describe(error) }))
+      return undefined
+    }
+  }, [describe, load])
+
+  const reveal = useCallback(async (id: string): Promise<void> => {
+    try {
+      await revealCapability(id)
+    } catch (error) {
+      if (disposed.current) return
+      // 打开目录不改配置，因此不进入 saving 状态，只把失败摆到用户面前。
+      setState(previous => ({ ...previous, writeError: describe(error) }))
+    }
+  }, [describe])
+
+  return { ...state, refresh: () => void load(), mutate, createSkill, reveal }
 }
 
 /** 由 hook 结果推导界面可用的配置；快照尚未到达时返回 undefined。 */

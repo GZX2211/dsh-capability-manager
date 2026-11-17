@@ -4,6 +4,7 @@ import {
   countByPool,
   DEFAULT_SPLIT_RATIO,
   partitionByPool,
+  sortPinnedFirst,
   sortResidentFirst,
   splitRatioAt,
 } from '../../../src/client/lib/transfer.ts'
@@ -81,6 +82,33 @@ describe('池内计数', () => {
   })
 })
 
+describe('置顶', () => {
+  it('把指定标识的行提到最前，其余保持相对顺序', () => {
+    const result = sortPinnedFirst([BASH, EDIT, READ], ['tool:read'])
+
+    expect(result.map(item => item.name)).toEqual(['read', 'bash', 'edit'])
+  })
+
+  it('多个置顶项保持它们在输入里的相对顺序', () => {
+    const result = sortPinnedFirst([BASH, EDIT, READ], ['tool:read', 'tool:bash'])
+
+    expect(result.map(item => item.name)).toEqual(['bash', 'read', 'edit'])
+  })
+
+  it('不在列表里的标识被忽略', () => {
+    const result = sortPinnedFirst([BASH, EDIT], ['tool:missing'])
+
+    expect(result.map(item => item.name)).toEqual(['bash', 'edit'])
+  })
+
+  it('空置顶表返回一份新数组，顺序不变', () => {
+    const input = [BASH, EDIT]
+    const result = sortPinnedFirst(input, [])
+
+    expect(result.map(item => item.name)).toEqual(['bash', 'edit'])
+    expect(result).not.toBe(input)
+  })
+})
 describe('分栏比例', () => {
   it('把指针位置换算成左栏占总宽的比例', () => {
     expect(splitRatioAt(600, { left: 100, width: 1000 })).toBe(0.5)

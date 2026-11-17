@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, fetchSnapshot, writeConfig } from '../../../src/client/lib/http.ts'
+import { ApiError, createSkill, fetchSnapshot, revealCapability, writeConfig } from '../../../src/client/lib/http.ts'
 import { REQUEST_HEADER, REQUEST_HEADER_VALUE, ROUTES } from '../../../src/shared/api.ts'
 
 const snapshot = {
@@ -120,5 +120,51 @@ describe('写入配置', () => {
     stubFetch(() => json({ ok: false, code: 'bad-request', message: 'x' }, 400))
 
     await expect(writeConfig(patch)).rejects.toBeInstanceOf(ApiError)
+  })
+})
+
+describe('手动创建 Skill', () => {
+  it('以 POST 提交 revision 并带自定义头', async () => {
+    const calls = stubFetch(() => json({ ok: true, revision: 3, capability: { id: 'skill:my-skill' } }))
+
+    await createSkill(2)
+
+    expect(calls[0]?.path).toBe(ROUTES.createSkill)
+    expect(calls[0]?.init.method).toBe('POST')
+    expect(calls[0]?.init.body).toBe(JSON.stringify({ revision: 2 }))
+    expect((calls[0]?.init.headers as Record<string, string>)[REQUEST_HEADER]).toBe(REQUEST_HEADER_VALUE)
+  })
+
+  it('返回服务端给出的新 revision 与能力条目', async () => {
+    stubFetch(() => json({ ok: true, revision: 3, capability: { id: 'skill:my-skill', name: 'my-skill' } }))
+
+    await expect(createSkill(2)).resolves.toMatchObject({
+      revision: 3,
+      capability: { id: 'skill:my-skill' },
+    })
+  })
+
+  it('冲突时抛出可识别错误码', async () => {
+    stubFetch(() => json({ ok: false, code: 'revision-conflict', message: 'changed', revision: 9 }, 409))
+
+    await expect(createSkill(2)).rejects.toMatchObject({ code: 'revision-conflict' })
+  })
+})
+
+describe('打开自建目录', () => {
+  it('以 POST 提交能力标识', async () => {
+    const calls = stubFetch(() => json({ ok: true }))
+
+    await revealCapability('skill:my-skill')
+
+    expect(calls[0]?.path).toBe(ROUTES.reveal)
+    expect(calls[0]?.init.method).toBe('POST')
+    expect(calls[0]?.init.body).toBe(JSON.stringify({ id: 'skill:my-skill' }))
+  })
+
+  it('非自建能力时把 not-owned 交给调用方', async () => {
+    stubFetch(() => json({ ok: false, code: 'not-owned', message: '不属于本插件' }, 403))
+
+    await expect(revealCapability('tool:read')).rejects.toMatchObject({ code: 'not-owned' })
   })
 })

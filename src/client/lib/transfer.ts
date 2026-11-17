@@ -74,10 +74,35 @@ export function countByPool(
 }
 
 /**
+ * 把指定标识的行提到列表最前。
+ *
+ * 两种用途共用同一实现：常驻项要浮到能力池顶部；刚创建的自建 Skill 要在排出池
+ * 顶部露头——长列表里按字母序沉底等于「创建成功但看不见」。两段内部都保持现有
+ * 顺序，不重新排序。
+ *
+ * @param entries - 一侧的当前行，顺序即界面顺序。
+ * @param pinned - 需要置顶的标识；其中不属于 `entries` 的标识被忽略。
+ * @returns 置顶项在前的新数组；输入不被修改。
+ */
+export function sortPinnedFirst(
+  entries: readonly CapabilityEntry[],
+  pinned: readonly CapabilityId[],
+): CapabilityEntry[] {
+  const pinnedIds = new Set(pinned)
+  const head: CapabilityEntry[] = []
+  const tail: CapabilityEntry[] = []
+  for (const entry of entries) {
+    if (pinnedIds.has(entry.id)) head.push(entry)
+    else tail.push(entry)
+  }
+  return [...head, ...tail]
+}
+
+/**
  * 把常驻能力提到列表前面。
  *
  * 常驻是用户显式配置的「初始即可用」，它比字母序更重要：常驻项可能只有一两个，
- * 沉在长列表里会让人以为没保存成功。两段内部都保持现有顺序，不重新排序。
+ * 沉在长列表里会让人以为没保存成功。
  *
  * @param entries - 一侧的当前行，顺序即界面顺序。
  * @param resident - 常驻名单；其中不属于 `entries` 的标识被忽略。
@@ -87,14 +112,7 @@ export function sortResidentFirst(
   entries: readonly CapabilityEntry[],
   resident: readonly CapabilityId[],
 ): CapabilityEntry[] {
-  const pinned = new Set(resident)
-  const head: CapabilityEntry[] = []
-  const tail: CapabilityEntry[] = []
-  for (const entry of entries) {
-    if (pinned.has(entry.id)) head.push(entry)
-    else tail.push(entry)
-  }
-  return [...head, ...tail]
+  return sortPinnedFirst(entries, resident)
 }
 
 /**

@@ -6,7 +6,7 @@
 // 给一个禁用的开关只会让人猜测为什么点不动。
 // `data-row-key` 是 AnimatedRows 定位同一行的依据，缺了它补位与淡出都不会发生。
 
-import { Button, IconPlusOutlineRegular, Switch, Tag, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconFolderOpenOutlineRegular, IconPlusOutlineRegular, Switch, Tag, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CapabilityEntry, CapabilitySource } from '../../shared/capability.ts'
 import type { CapabilityConfig } from '../../shared/config.ts'
 import type { Dict, Translate } from '../i18n.ts'
@@ -30,10 +30,12 @@ export interface CapabilityRowProps {
   onAdd: (id: string) => void
   onRemove: (id: string) => void
   onToggleResident: (id: string, next: boolean) => void
+  /** 打开自建能力的目录；只有 `owned` 的行会出现入口。 */
+  onReveal: (id: string) => void
   t: Translate
 }
 
-export function CapabilityRow({ entry, config, side, disabled, onAdd, onRemove, onToggleResident, t }: CapabilityRowProps) {
+export function CapabilityRow({ entry, config, side, disabled, onAdd, onRemove, onToggleResident, onReveal, t }: CapabilityRowProps) {
   const resident = config.resident.includes(entry.id)
 
   return (
@@ -48,6 +50,20 @@ export function CapabilityRow({ entry, config, side, disabled, onAdd, onRemove, 
       </div>
 
       <div className="cm-row-actions">
+        {/* 目录入口在加号/减号左侧：它是「先去编辑」，主操作仍然是入池/出池。 */}
+        {entry.owned ? (
+          <Tooltip label={t('openFolder')} side="left">
+            <Button
+              className="cm-row-action"
+              variant="ghost"
+              size="sm"
+              icon={<IconFolderOpenOutlineRegular />}
+              aria-label={`${t('openFolder')}: ${entry.name}`}
+              disabled={disabled}
+              onClick={() => onReveal(entry.id)}
+            />
+          </Tooltip>
+        ) : null}
         {side === 'pooled' ? (
           <>
             <Switch

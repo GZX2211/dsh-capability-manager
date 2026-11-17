@@ -31,12 +31,13 @@ export interface TransferPaneProps {
   onAdd: (id: string) => void
   onRemove: (id: string) => void
   onToggleResident: (id: string, next: boolean) => void
+  onReveal: (id: string) => void
   t: Translate
 }
 
 export function TransferPane({
   side, title, count, total, entries, config, disabled, ready, resetKey,
-  emptyTitle, emptyHint, onAdd, onRemove, onToggleResident, t,
+  emptyTitle, emptyHint, onAdd, onRemove, onToggleResident, onReveal, t,
 }: TransferPaneProps) {
   return (
     <section className="cm-pane" aria-label={title}>
@@ -70,6 +71,7 @@ export function TransferPane({
                 onAdd={onAdd}
                 onRemove={onRemove}
                 onToggleResident={onToggleResident}
+                onReveal={onReveal}
                 t={t}
               />
             ))}

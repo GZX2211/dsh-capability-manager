@@ -22,10 +22,12 @@ export interface CreateCapabilityMenuProps {
   /** 写入进行中：整个分裂按钮禁用，避免把用户带离当前页面。 */
   disabled: boolean
   onCreateWithAgent: () => void
+  /** 手动创建：由页面负责建骨架并把视线带到新行。 */
+  onCreateSkill: () => void
   t: Translate
 }
 
-export function CreateCapabilityMenu({ disabled, onCreateWithAgent, t }: CreateCapabilityMenuProps) {
+export function CreateCapabilityMenu({ disabled, onCreateWithAgent, onCreateSkill, t }: CreateCapabilityMenuProps) {
   const [open, setOpen] = useState(false)
   const dismiss = () => { setOpen(false) }
   const toggle = () => { setOpen(value => !value) }
@@ -82,9 +84,7 @@ export function CreateCapabilityMenu({ disabled, onCreateWithAgent, t }: CreateC
         </MenuItemButton>
         <MenuItemButton
           icon={<IconSkillOutlineRegular size={14} />}
-          disabled
-          disabledReason={t('createSkillDisabledReason')}
-          onSelect={() => {}}
+          onSelect={() => { dismiss(); onCreateSkill() }}
         >
           {t('createSkillManually')}
         </MenuItemButton>
