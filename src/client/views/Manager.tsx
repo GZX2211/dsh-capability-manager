@@ -201,10 +201,6 @@ export function Manager({ t, onCreateWithAgent }: ManagerProps) {
                 <IconLoadingOutlineRegular />
                 <span>{t('loading')}</span>
               </div>
-            ) : tab === 'skills' ? (
-              <div className="cm-body">
-                <p className="cm-placeholder">{t('skillsPlaceholder')}</p>
-              </div>
             ) : config === undefined ? null : (
               <div
                 className="cm-transfer"

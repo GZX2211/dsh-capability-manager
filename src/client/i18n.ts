@@ -15,7 +15,7 @@ export const zh = {
   createCapabilityMenu: '选择创建方式',
   createWithAgent: '让 Agent 创建能力',
   createSkillManually: '手动创建 Skill',
-  createSkillDisabledReason: 'M2 之后开启',
+  createSkillDisabledReason: 'M3 之后开启',
   createUnavailable: '当前环境没有可用的新会话入口',
   // 冒号后的空格是给用户续写的位置，不要删。
   createPrompt: '帮我创建一个 skill / 工具 / MCP: ',
@@ -69,7 +69,6 @@ export const zh = {
   emptyHint: '换个筛选条件或清空搜索词试试',
 
   settingsPlaceholder: '设置项（向量检索开关、Router / Worker 黑名单）将在后续里程碑提供。',
-  skillsPlaceholder: 'Skill 的池与常驻控制将在下一个里程碑提供。',
 
   warningTitle: '注意',
   warningMetaSearchNotResident: 'meta_search 不在常驻里，池内那些非常驻能力将无法被召回。',
@@ -100,7 +99,7 @@ export const en: Dict = {
   createCapabilityMenu: 'Choose how to create',
   createWithAgent: 'Let the Agent create it',
   createSkillManually: 'Create a skill manually',
-  createSkillDisabledReason: 'Available after M2',
+  createSkillDisabledReason: 'Available after M3',
   createUnavailable: 'This environment has no new-session entry',
   // The space after the colon is where the user continues typing; keep it.
   createPrompt: 'Help me create a skill / tool / MCP: ',
@@ -154,7 +153,6 @@ export const en: Dict = {
   emptyHint: 'Try another filter or clear the search',
 
   settingsPlaceholder: 'Settings (vector search, Router / Worker blacklists) arrive in a later milestone.',
-  skillsPlaceholder: 'Pool and resident control for skills arrive in the next milestone.',
 
   warningTitle: 'Heads up',
   warningMetaSearchNotResident: 'meta_search is not resident, so non-resident pool capabilities cannot be recalled.',
