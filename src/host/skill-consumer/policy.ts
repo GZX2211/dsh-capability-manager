@@ -55,22 +55,6 @@ export function isSkillEnabled(input: SkillEnabledInput): boolean {
   return isInPool(input.id, input.config) && !blacklistFor(input.config, input.role).has(input.id)
 }
 
-/**
- * 官方 `/name` 手势注入的 Skill 是否允许。
- *
- * 手势路径不经过我们的 shadow `skill` 工具，因此必须单独校验：入口工具被排除
- * 出池时所有 Skill 都不可加载（§3.5），具体 Skill 还要在池内且不在该角色黑名单。
- * 不判常驻：手势是用户显式发起，不是模型的自启动能力。
- *
- * @param input - Skill 标识、配置与角色。
- * @returns 允许注入用户显式加载的 Skill 时为 true。
- */
-export function isSkillGestureAllowed(input: SkillEnabledInput): boolean {
-  if (!isInPool(SKILL_TOOL_ID, input.config)) return false
-  if (blacklistFor(input.config, input.role).has(SKILL_TOOL_ID)) return false
-  return isSkillEnabled(input)
-}
-
 export interface CatalogInjectionInput {
   /** `meta_search` 此刻是否可用（池内、非黑名单、常驻或已召回）。 */
   metaSearchUsable: boolean

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   isCatalogInjected,
   isSkillEnabled,
-  isSkillGestureAllowed,
   isSkillToolUsable,
   shouldInjectSkillCatalog,
   SKILL_TOOL_NAME,
@@ -74,36 +73,6 @@ describe('Skill 能力池归属', () => {
 
   it('非法标识永远不可用', () => {
     expect(isSkillEnabled({ id: 'office', config: DEFAULT_CONFIG, role: undefined })).toBe(false)
-  })
-})
-
-describe('用户显式 /name 手势', () => {
-  function gesture(patch: Partial<CapabilityConfig>, role: SessionRoleName | undefined = undefined) {
-    return isSkillGestureAllowed({ id: 'skill:office', config: config(patch), role })
-  }
-
-  it('池内 Skill 允许用户显式加载', () => {
-    expect(gesture({})).toBe(true)
-  })
-
-  it('池外 Skill 不允许', () => {
-    expect(gesture({ excluded: ['skill:office'] })).toBe(false)
-  })
-
-  it('该角色黑名单里的 Skill 不允许', () => {
-    expect(gesture({ blacklist: { router: ['skill:office'], worker: [] } }, 'router')).toBe(false)
-  })
-
-  it('入口工具被排除出池时所有 Skill 都不允许', () => {
-    expect(gesture({ excluded: ['tool:skill'] })).toBe(false)
-  })
-
-  it('入口工具被该角色拉黑时不允许', () => {
-    expect(gesture({ blacklist: { router: ['tool:skill'], worker: [] } }, 'router')).toBe(false)
-  })
-
-  it('入口工具非常驻仍允许：手势是用户显式发起，不是模型自启动', () => {
-    expect(gesture({ resident: ['tool:meta_search'] })).toBe(true)
   })
 })
 
