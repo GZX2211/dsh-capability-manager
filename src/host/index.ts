@@ -83,9 +83,10 @@ export function apply(ctx: HostContext, config?: Config): void {
 
   // ---- Skill 侧共享的查询面 ----
   // workingDirectory 是可选服务：缺席时项目级 Skill 不可见，但用户级 Skill 与
-  // 全局能力仍然工作，因此不让它成为插件的加载前置条件。
-  const workingDirectory = ctx.get('workingDirectory') as WorkingDirectoryLike | undefined
+  // 全局能力仍然工作，因此不让它成为插件的加载前置条件。每次调用重新探测，
+  // 与 paRoles 的理由相同：服务可能比本插件晚加载。
   const cwdOf = async (agent: unknown, signal?: AbortSignal): Promise<string | undefined> => {
+    const workingDirectory = ctx.get('workingDirectory') as WorkingDirectoryLike | undefined
     if (workingDirectory === undefined) return undefined
     try {
       return await workingDirectory.ensure(agent, signal)
