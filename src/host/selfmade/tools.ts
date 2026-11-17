@@ -172,6 +172,18 @@ export class SelfmadeTools {
     return new Set(this.registered.keys())
   }
 
+  /**
+   * 当前扫描结果。
+   *
+   * 界面需要展示「还没有被任何会话吸收过」的自建工具，因此这里不走注册表，
+   * 而是直接回报磁盘事实；调用方自己决定怎么合并。
+   *
+   * @returns 通过校验的工具条目。
+   */
+  catalog(): ScannedSelfmadeTool[] {
+    return scanSelfmadeTools(this.options.stateDir, message => this.warnOnce(message))
+  }
+
   /** 插件卸载：停止监听并注销全部自建工具。 */
   dispose(): void {
     this.closed = true

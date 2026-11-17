@@ -243,7 +243,13 @@ export function apply(ctx: HostContext, config?: Config): void {
             const agent = context.agent
             if (agent === undefined) return ''
             const tools = selectToolIndex({
-              tools: summariesOf(collectCapabilities(enforcement, current)),
+              // 索引是同步回调：直接读磁盘事实与本机连接，不做异步等待。
+              tools: summariesOf(collectCapabilities(
+                enforcement,
+                current,
+                selfmadeTools.catalog().map(tool => ({ name: tool.name, description: tool.meta.description })),
+                mcpServerNames(ctx),
+              )),
               config: current,
               role: roles.roleOf(agent.id),
               appeared: toolNamesOf(visibleToolsOf(agent, log)),
@@ -330,11 +336,18 @@ export function apply(ctx: HostContext, config?: Config): void {
               // 监听可能漏事件；每次读快照前先对账一次，界面总能自愈。
               selfmadeTools.rescan()
               const current = store.read()
+              const mcpServers = mcpServerNames(ctx)
+              const selfmade = selfmadeTools.catalog()
               return buildSnapshot({
                 revision: store.revision,
                 capabilities: [
-                  ...collectCapabilities(enforcement, current),
-                  ...await collectSkillCapabilities(ctx, skillQuery, current, log),
+                  ...collectCapabilities(
+                    enforcement,
+                    current,
+                    selfmade.map(tool => ({ name: tool.name, description: tool.meta.description })),
+                    mcpServers,
+                  ),
+                  ...await collectSkillCapabilities(ctx, skillQuery, current, log, selfmadeSkills.names()),
                 ],
                 config: current,
                 rolesAvailable: roles.available,
@@ -392,18 +405,36 @@ function listLiveAgents(ctx: HostContext, log: (message: string) => void): Agent
 /**
  * 全量能力目录。
  *
- * schema 缓存是唯一的工具来源：它由吸收过程填充，因此包含当前被掩掉的工具——
- * 界面要能显示并重新启用它们。
+ * schema 缓存是工具的主要来源：它由吸收过程填充，因此包含当前被掩掉的工具——
+ * 界面要能显示并重新启用它们。自建工具还要再并一次目录扫描：刚创建、还没有
+ * 任何会话吸收过的工具只存在于磁盘上，不能让它在界面上「创建成功却看不见」。
+ *
+ * @param enforcement - 提供 schema 缓存。
+ * @param config - 当前配置，用于判定可用性。
+ * @param selfmade - 自建工具的磁盘事实（名称 + 描述）。
+ * @param mcpServers - 已连接的 MCP 服务器名，用于来源判定。
+ * @returns 工具条目。
  */
-function collectCapabilities(enforcement: EnforcementRegistry, config: CapabilityConfig): CapabilityEntry[] {
-  const definitions = [...enforcement.schemasOf().values()].map(schema => ({
-    name: schema.name,
-    description: schema.description,
-  }))
+function collectCapabilities(
+  enforcement: EnforcementRegistry,
+  config: CapabilityConfig,
+  selfmade: readonly { name: string; description: string }[],
+  mcpServers: readonly string[],
+): CapabilityEntry[] {
+  const definitions = new Map(
+    [...enforcement.schemasOf().values()].map(schema => [
+      schema.name,
+      { name: schema.name, description: schema.description ?? '' },
+    ]),
+  )
+  const owned = new Set<string>()
+  for (const tool of selfmade) {
+    owned.add(tool.name)
+    if (!definitions.has(tool.name)) definitions.set(tool.name, tool)
+  }
   return collectTools({
-    definitions,
-    // M2 尚无自建工具与 MCP 连接：全部按官方来源呈现。
-    classify: name => classifySource(name, { owned: new Set(), mcpServers: [] }),
+    definitions: [...definitions.values()],
+    classify: name => classifySource(name, { owned, mcpServers }),
     isAvailable: name => !config.excluded.includes(toolId(name)),
   })
 }
@@ -419,13 +450,14 @@ async function collectSkillCapabilities(
   deps: SkillQueryDependencies,
   config: CapabilityConfig,
   log: (message: string) => void,
+  selfmade: ReadonlySet<string>,
 ): Promise<CapabilityEntry[]> {
   const summaries = await allSkillSummaries(deps, listLiveAgents(ctx, log))
   const skillToolExcluded = config.excluded.includes(SKILL_TOOL_ID)
   return collectSkills({
     skills: summaries,
-    // M2 尚无自建 Skill：全部按官方来源呈现。
-    classify: name => classifySource(name, { owned: new Set(), mcpServers: [] }),
+    // Skill 侧只有「自建 / 官方」两类来源；MCP 服务器只提供工具。
+    classify: name => classifySource(name, { owned: selfmade, mcpServers: [] }),
     // 入口工具被排除时所有 Skill 都无法加载；其余情况只看 Skill 自己的池归属。
     isAvailable: skill => !skillToolExcluded && !config.excluded.includes(skillId(skill.name)),
   })
@@ -507,6 +539,34 @@ function skillScopeOf(agent: unknown): ShadowSkillAgentScope {
 /** Skill 判定只读取会话身份与召回集合；没有会话时按空会话处理。 */
 function sessionOf(agent: unknown): SessionLike {
   return (agent as { session: SessionLike }).session
+}
+
+/** `ctx.mcpManager` 的只读面；本插件只读连接，不新建连接。 */
+interface McpManagerLike {
+  list(): readonly { name?: unknown }[]
+}
+
+/**
+ * 已连接的 MCP 服务器名。
+ *
+ * 服务按需探测：MCP 客户端可能比本插件晚加载。读不到时只影响 `<server>__<tool>`
+ * 的来源标签，不影响能力池本身。
+ *
+ * @param ctx - 宿主上下文。
+ * @returns 非空服务器名；失败时为空数组。
+ */
+function mcpServerNames(ctx: HostContext): string[] {
+  try {
+    const manager = ctx.get('mcpManager') as McpManagerLike | undefined
+    const servers = manager?.list?.() ?? []
+    const names: string[] = []
+    for (const server of servers) {
+      if (typeof server?.name === 'string' && server.name.length > 0) names.push(server.name)
+    }
+    return names
+  } catch {
+    return []
+  }
 }
 
 /** `workingDirectory` 是用到时才探测的可选服务；缺席时项目级 Skill 不可见。 */

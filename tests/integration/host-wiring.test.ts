@@ -6,7 +6,7 @@
 // 这里只在服务边界用替身（tools / systemPrompt / webServer / agents / skills），
 // 不 mock 被测模块本身；目录、shadow、检索编排都是真实实现。
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -45,7 +45,14 @@ function toolSource(name: string) {
   return { name, description: `${name} 的说明`, parameters: { type: 'object', properties: {} } }
 }
 
-function createHost(options: { config?: CapabilityConfig; skills?: readonly { name: string; description: string }[] } = {}) {
+function createHost(options: {
+  config?: CapabilityConfig
+  skills?: readonly { name: string; description: string }[]
+  /** 额外注册的全局工具名，用来模拟 preset 层与 MCP 工具。 */
+  extraTools?: readonly string[]
+  /** 已连接的 MCP 服务器名。 */
+  mcpServers?: readonly string[]
+} = {}) {
   const stateDir = mkdtempSync(join(tmpdir(), 'cm-wiring-'))
   tempDirs.push(stateDir)
 
@@ -57,6 +64,7 @@ function createHost(options: { config?: CapabilityConfig; skills?: readonly { na
   const warnings: string[] = []
   const sections: unknown[] = []
   const webServers: unknown[] = []
+  const providers: unknown[] = []
   const skillList = options.skills ?? [{ name: 'alpha-skill', description: 'Alpha 的说明' }]
   const skillSummaries = skillList.map(skill => ({
     ...skill,
@@ -69,7 +77,12 @@ function createHost(options: { config?: CapabilityConfig; skills?: readonly { na
   // definitions() 必须反映当前生效的 restriction：enforcement 会先解除自己的限制
   // 再吸收，而 seenTools 读的是限制生效后的可见集。
   let allowed: Set<string> | undefined
-  const allTools = () => [toolSource('meta_search'), toolSource('skill'), toolSource('read')]
+  const allTools = () => [
+    toolSource('meta_search'),
+    toolSource('skill'),
+    toolSource('read'),
+    ...(options.extraTools ?? []).map(toolSource),
+  ]
 
   const agent: FakeAgent = {
     id: 'session-1',
@@ -114,11 +127,20 @@ function createHost(options: { config?: CapabilityConfig; skills?: readonly { na
     async get() {
       return undefined
     },
+    registerProvider(create: (control: { invalidate: () => void }) => unknown) {
+      providers.push(create({ invalidate: () => {} }))
+      return () => {}
+    },
   }
 
   const ctx = {
     logger: { warn: (...args: unknown[]) => { warnings.push(args.map(String).join(' ')) } },
-    get: (name: string) => (name === 'paRoles' ? undefined : undefined),
+    get: (name: string) => {
+      if (name === 'mcpManager' && options.mcpServers !== undefined) {
+        return { list: () => options.mcpServers?.map(server => ({ name: server })) }
+      }
+      return undefined
+    },
     effect: (callback: () => () => void) => {
       const cleanup = callback()
       cleanups.push(cleanup)
@@ -139,6 +161,7 @@ function createHost(options: { config?: CapabilityConfig; skills?: readonly { na
         globalTools.push(definition)
         return () => {}
       },
+      get: () => undefined,
     },
     systemPrompt: {
       section: (input: unknown) => {
@@ -168,7 +191,7 @@ function createHost(options: { config?: CapabilityConfig; skills?: readonly { na
   }
 
   const snapshot = async (): Promise<{
-    capabilities: { id: string; kind: string; name: string }[]
+    capabilities: { id: string; kind: string; name: string; source?: string; owned?: boolean }[]
     diagnostics?: { agents: { presentCount: number; allowCount: number }[] }
   }> => {
     const server = webServers[0] as { handler: (req: unknown, res: unknown) => Promise<void> }
@@ -196,6 +219,8 @@ function createHost(options: { config?: CapabilityConfig; skills?: readonly { na
     sections,
     webServers,
     snapshot,
+    stateDir,
+    providers,
     onOptions,
     config: options.config ?? DEFAULT_CONFIG,
     createAgent() {
@@ -299,4 +324,102 @@ describe('apply 装配', () => {
       'skill:alpha-skill',
     ])
   })
+
+  it('自建工具在还没有会话吸收前就出现在快照里，并标为自建', async () => {
+    const host = createHost()
+    writeSelfmadeTool(host.stateDir, 'greet', { name: 'greet', description: '打招呼' })
+
+    const snapshot = await host.snapshot()
+
+    expect(snapshot.capabilities.find(capability => capability.id === 'tool:greet')).toMatchObject({
+      source: 'custom',
+      owned: true,
+    })
+  })
+
+  it('自建工具会被真的注册到工具表里', async () => {
+    const host = createHost()
+    writeSelfmadeTool(host.stateDir, 'greet', { name: 'greet', description: '打招呼' })
+
+    await host.snapshot()
+
+    expect(host.globalTools.map(tool => tool.name)).toContain('greet')
+  })
+
+  it('MCP 命名空间下的工具标为 mcp 来源', async () => {
+    const host = createHost({ extraTools: ['github__issue'], mcpServers: ['github'] })
+
+    const snapshot = await host.snapshot()
+
+    expect(snapshot.capabilities.find(capability => capability.id === 'tool:github__issue')).toMatchObject({
+      source: 'mcp',
+      owned: false,
+    })
+  })
+
+  it('自建 Skill 被标为自建并接进 provider', async () => {
+    const host = createHost({ skills: [{ name: 'mine', description: '我的 Skill' }] })
+    writeSelfmadeSkill(host.stateDir, 'mine')
+
+    const snapshot = await host.snapshot()
+
+    expect(snapshot.capabilities.find(capability => capability.id === 'skill:mine')).toMatchObject({
+      source: 'custom',
+      owned: true,
+    })
+    expect(host.providers).toHaveLength(1)
+  })
+
+  it('自建 Skill provider 列出状态目录里的 Skill', async () => {
+    const host = createHost()
+    writeSelfmadeSkill(host.stateDir, 'mine')
+    const provider = host.providers[0] as {
+      list(options: unknown): Promise<readonly { name: string; source: string }[]>
+    }
+
+    const listed = await provider.list({})
+
+    expect(listed).toEqual([expect.objectContaining({ name: 'mine', source: 'custom' })])
+  })
+
+  it('三角测量：工具与 Skill 的归属互不串味', async () => {
+    const host = createHost({ extraTools: ['greet'], skills: [{ name: 'greet', description: '同名 Skill' }] })
+    writeSelfmadeSkill(host.stateDir, 'greet')
+
+    const snapshot = await host.snapshot()
+
+    expect(snapshot.capabilities.find(capability => capability.id === 'tool:greet')).toMatchObject({ source: 'official' })
+    expect(snapshot.capabilities.find(capability => capability.id === 'skill:greet')).toMatchObject({ source: 'custom' })
+  })
 })
+
+/** 在状态目录里放一个声明式自建工具，走真实的扫描与注册路径。 */
+function writeSelfmadeTool(
+  stateDir: string,
+  name: string,
+  meta: { name: string; description: string },
+): void {
+  const dir = join(stateDir, 'tools', name)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, 'meta.json'),
+    JSON.stringify({
+      ...meta,
+      parameters: { type: 'object', properties: {} },
+      kind: 'shell',
+      shell: { command: 'echo' },
+    }),
+    'utf8',
+  )
+}
+
+/** 在状态目录里放一个自建 Skill 包。 */
+function writeSelfmadeSkill(stateDir: string, name: string): void {
+  const dir = join(stateDir, 'skills', name)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, 'SKILL.md'),
+    ['---', `name: ${name}`, `description: ${name} 的说明`, '---', '', '# 正文'].join('\n'),
+    'utf8',
+  )
+}
