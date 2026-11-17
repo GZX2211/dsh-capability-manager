@@ -73,6 +73,7 @@ describe('目录渲染', () => {
     expect(text).toContain('- `beta`：beta 的说明')
     expect(text).toContain('skill')
     expect(text).toContain('不要按摘要推断')
+    expect(text).toContain('不要再用 skill 工具重复加载')
     expect(text.endsWith('</system-reminder>')).toBe(true)
   })
 

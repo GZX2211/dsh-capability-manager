@@ -113,6 +113,7 @@ export function renderCatalog(entries: readonly CatalogEntry[], mode: CatalogMod
     '</available_skills>',
     '',
     '当用户点名某个 Skill，或任务明显匹配某个 Skill 的描述时，用 skill 工具按准确名称加载后再行动。',
+    '当用户直接以 /名称 调用 Skill 时，其 <skill_content> 块已经出现在对话里；直接遵循它，不要再用 skill 工具重复加载。',
     '本清单只有摘要；加载前不要按摘要推断 Skill 的完整指令。',
     '</system-reminder>',
   ]
