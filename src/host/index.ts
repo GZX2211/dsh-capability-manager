@@ -13,6 +13,7 @@ import type { ToolSource } from './catalog/collect.ts'
 import { toolId } from '../shared/capability.ts'
 import { SKILL_TOOL_ID, type CapabilityConfig, type SessionRoleName } from '../shared/config.ts'
 import { applyPatch } from './admin/mutate.ts'
+import { createSkillAction, revealAction } from './admin/selfmade.ts'
 import { createAdminHandler, type ConfigOutcome } from './admin/server.ts'
 import { buildSnapshot } from './admin/snapshot.ts'
 import { buildToolCandidates } from './catalog/candidates.ts'
@@ -27,6 +28,8 @@ import { renderIndex, selectToolIndex, shouldInjectIndex } from './prompt/index-
 import { createRoleResolver } from './roles/resolve.ts'
 import { skillPayload } from './search/payload.ts'
 import { toolNamesOf, toolPayloadsOf } from './search/seen.ts'
+import { SelfmadeSkills } from './selfmade/skills.ts'
+import { SelfmadeTools } from './selfmade/tools.ts'
 import { catalogEntries } from './skill-consumer/catalog.ts'
 import { createCatalogListener, type CatalogPlan } from './skill-consumer/catalog-inject.ts'
 import { isSkillToolUsable, shouldInjectSkillCatalog } from './skill-consumer/policy.ts'
@@ -161,6 +164,42 @@ export function apply(ctx: HostContext, config?: Config): void {
     ctx.effect(() => ctx.tools.register(metaSearch), 'capability-manager: meta_search')
   })
 
+  // ---- 自建工具：扫描 <state>/tools 并热注册 ----
+  // 注册进 global 层：新工具对之后创建的 agent 可见，对已存在的 agent 由
+  // `tools/change` → 吸收 → 重建 restriction 接管。
+  const selfmadeTools = new SelfmadeTools({
+    stateDir,
+    register: definition => ctx.tools.register(definition),
+    isTaken: toolName => ctx.tools.get(toolName) !== undefined,
+    workspaceOf: cwdOf,
+    log,
+  })
+  guard(log, 'start the self-made tool registry', () => {
+    ctx.effect(() => {
+      selfmadeTools.start()
+      return () => selfmadeTools.dispose()
+    }, 'capability-manager: self-made tools')
+  })
+
+  // ---- 自建 Skill：<state>/skills 作为 provider 接进 ctx.skills ----
+  // 目录变化只用来让注册表丢缓存；列表与正文每次请求都重新读盘。
+  const selfmadeSkills = new SelfmadeSkills({ stateDir, log })
+  guard(log, 'register the self-made skill provider', () => {
+    ctx.effect(() => {
+      selfmadeSkills.start()
+      let stopWatching: (() => void) | undefined
+      const releaseProvider = ctx.skills.registerProvider(control => {
+        stopWatching = selfmadeSkills.onChange(control.invalidate)
+        return selfmadeSkills.provider()
+      })
+      return () => {
+        stopWatching?.()
+        releaseProvider()
+        selfmadeSkills.dispose()
+      }
+    }, 'capability-manager: self-made skills')
+  })
+
   // ---- Skill 目录注入（pre-step） ----
   guard(log, 'register skill catalog', () => {
     ctx.effect(
@@ -288,6 +327,8 @@ export function apply(ctx: HostContext, config?: Config): void {
             origin,
             stateDir,
             snapshot: async () => {
+              // 监听可能漏事件；每次读快照前先对账一次，界面总能自愈。
+              selfmadeTools.rescan()
               const current = store.read()
               return buildSnapshot({
                 revision: store.revision,
@@ -307,6 +348,12 @@ export function apply(ctx: HostContext, config?: Config): void {
               })
             },
             writeConfig: patch => writeConfig(store, patch),
+            createSkill: body => createSkillAction({ store, stateDir, log }, body),
+            reveal: body => revealAction({
+              stateDir,
+              ownsTool: toolName => selfmadeTools.names().has(toolName),
+              directoryOfSkill: skillName => selfmadeSkills.directoryOf(skillName),
+            }, body),
           }),
         }),
       'capability-manager: http',

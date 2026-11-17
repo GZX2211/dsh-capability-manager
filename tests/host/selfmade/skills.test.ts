@@ -222,6 +222,16 @@ describe('自建 Skill provider', () => {
     skills.dispose()
   })
 
+  it('三角测量：directoryOf 按 frontmatter 名找到实际目录', () => {
+    const root = stateDir()
+    const dir = writeSkill(root, 'dir-name', 'body', { name: 'real-name' })
+    const skills = create(root)
+
+    expect(skills.directoryOf('real-name')).toBe(dir)
+    expect(skills.directoryOf('dir-name')).toBeUndefined()
+    skills.dispose()
+  })
+
   it('监听文件变化时通知变更；dispose 后不再通知', async () => {
     const root = stateDir()
     const skills = create(root, true)

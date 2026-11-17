@@ -26,6 +26,8 @@ function makeTarget(overrides: Partial<AdminTarget> = {}): AdminTarget {
       warnings: [],
     }),
     writeConfig: async () => ({ status: 200, body: { ok: true, revision: 1 } }),
+    createSkill: async () => ({ status: 200, body: { ok: true, revision: 1 } }),
+    reveal: async () => ({ status: 200, body: { ok: true } }),
     ...overrides,
   }
 }
@@ -249,6 +251,75 @@ describe('配置写入', () => {
   })
 })
 
+describe('手动创建 Skill 端点', () => {
+  it('把请求体原样交给创建动作', async () => {
+    const createSkill = vi.fn(async () => ({ status: 200, body: { ok: true, revision: 1 } }))
+
+    const { captured, json } = await call(makeTarget({ createSkill }), {
+      method: 'POST',
+      path: `${API_PREFIX}/skills`,
+      headers: sameOrigin,
+      body: { revision: 0 },
+    })
+
+    expect(captured.status).toBe(200)
+    expect(json).toMatchObject({ ok: true })
+    expect(createSkill).toHaveBeenCalledWith({ revision: 0 })
+  })
+
+  it('只接受 POST', async () => {
+    const createSkill = vi.fn()
+
+    const { captured } = await call(makeTarget({ createSkill }), { path: `${API_PREFIX}/skills`, headers: sameOrigin })
+
+    expect(captured.status).toBe(405)
+    expect(createSkill).not.toHaveBeenCalled()
+  })
+
+  it('受同源守卫保护', async () => {
+    const createSkill = vi.fn()
+
+    const { captured } = await call(makeTarget({ createSkill }), {
+      method: 'POST',
+      path: `${API_PREFIX}/skills`,
+      body: { revision: 0 },
+    })
+
+    expect(captured.status).toBe(403)
+    expect(createSkill).not.toHaveBeenCalled()
+  })
+})
+
+describe('打开目录端点', () => {
+  it('把请求体原样交给打开动作', async () => {
+    const reveal = vi.fn(async () => ({ status: 200, body: { ok: true } }))
+
+    const { captured } = await call(makeTarget({ reveal }), {
+      method: 'POST',
+      path: `${API_PREFIX}/reveal`,
+      headers: sameOrigin,
+      body: { id: 'skill:my-skill' },
+    })
+
+    expect(captured.status).toBe(200)
+    expect(reveal).toHaveBeenCalledWith({ id: 'skill:my-skill' })
+  })
+
+  it('只接受 POST 且受同源守卫保护', async () => {
+    const reveal = vi.fn()
+
+    const wrongMethod = await call(makeTarget({ reveal }), { path: `${API_PREFIX}/reveal`, headers: sameOrigin })
+    const wrongOrigin = await call(makeTarget({ reveal }), {
+      method: 'POST',
+      path: `${API_PREFIX}/reveal`,
+      body: { id: 'skill:x' },
+    })
+
+    expect(wrongMethod.captured.status).toBe(405)
+    expect(wrongOrigin.captured.status).toBe(403)
+    expect(reveal).not.toHaveBeenCalled()
+  })
+})
 describe('未知路径', () => {
   it('返回稳定的 not-found 错误码', async () => {
     const { captured, json } = await call(makeTarget(), {

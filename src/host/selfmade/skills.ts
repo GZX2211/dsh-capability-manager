@@ -140,6 +140,19 @@ export class SelfmadeSkills {
     return new Set(this.entries().map(entry => entry.name))
   }
 
+  /**
+   * 按 Skill 名找它的包目录。
+   *
+   * 目录名与 frontmatter 名允许不同，因此打开文件夹必须走这条映射，
+   * 不能把名字直接拼进路径。
+   *
+   * @param name - frontmatter 里的 Skill 名。
+   * @returns Skill 包目录；不存在时为 undefined。
+   */
+  directoryOf(name: string): string | undefined {
+    return this.entries().find(entry => entry.name === name)?.dir
+  }
+
   /** 交给 `ctx.skills.registerProvider` 的 provider。 */
   provider(): SkillProvider {
     return {

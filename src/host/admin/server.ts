@@ -29,6 +29,10 @@ export interface AdminTarget {
   snapshot: () => Promise<SnapshotResponse> | SnapshotResponse
   /** 提交一次配置改动；请求体未经校验，由配置层收窄。 */
   writeConfig: (patch: unknown) => Promise<ConfigOutcome>
+  /** 手动创建一个自建 Skill 的骨架。 */
+  createSkill: (body: unknown) => Promise<ConfigOutcome> | ConfigOutcome
+  /** 在系统文件管理器里打开一个自建能力的目录。 */
+  reveal: (body: unknown) => Promise<ConfigOutcome> | ConfigOutcome
 }
 
 /**
@@ -80,21 +84,40 @@ async function dispatch(target: AdminTarget, request: IncomingMessage, response:
 
   if (path === ROUTES.config) {
     if (method !== 'POST') return sendMethodNotAllowed(response, 'POST')
-    let body: unknown
-    try {
-      body = await readJson(request)
-    } catch (error) {
-      return sendJson(
-        response,
-        400,
-        failure(ERROR_CODES.badRequest, error instanceof Error ? error.message : String(error)),
-      )
-    }
-    const outcome = await target.writeConfig(body)
-    return sendJson(response, outcome.status, outcome.body)
+    return postJson(request, response, target.writeConfig)
+  }
+
+  if (path === ROUTES.createSkill) {
+    if (method !== 'POST') return sendMethodNotAllowed(response, 'POST')
+    return postJson(request, response, target.createSkill)
+  }
+
+  if (path === ROUTES.reveal) {
+    if (method !== 'POST') return sendMethodNotAllowed(response, 'POST')
+    return postJson(request, response, target.reveal)
   }
 
   return sendJson(response, 404, failure(ERROR_CODES.notFound, `no route for ${path}`))
+}
+
+/** 三个写端点共用的协议层：读 JSON → 交给动作 → 原样发回它的状态与响应体。 */
+async function postJson(
+  request: IncomingMessage,
+  response: ServerResponse,
+  action: (body: unknown) => Promise<ConfigOutcome> | ConfigOutcome,
+): Promise<void> {
+  let body: unknown
+  try {
+    body = await readJson(request)
+  } catch (error) {
+    return sendJson(
+      response,
+      400,
+      failure(ERROR_CODES.badRequest, error instanceof Error ? error.message : String(error)),
+    )
+  }
+  const outcome = await action(body)
+  return sendJson(response, outcome.status, outcome.body)
 }
 
 function failure(code: ErrorResponse['code'], message: string): ErrorResponse {
