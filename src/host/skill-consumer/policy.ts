@@ -7,7 +7,7 @@
 // 唯一判定来源。
 
 import { parseId, type CapabilityId } from '../../shared/capability.ts'
-import { SKILL_TOOL_ID, type CapabilityConfig, type SessionRoleName } from '../../shared/config.ts'
+import { META_SEARCH_TOOL_ID, SKILL_TOOL_ID, type CapabilityConfig, type SessionRoleName } from '../../shared/config.ts'
 import { blacklistFor, isInPool, isToolUsable } from '../policy/pool.ts'
 
 /** 官方与 shadow 共用的工具名；同名是 shadow 生效的前提。 */
@@ -74,4 +74,26 @@ export interface CatalogInjectionInput {
  */
 export function isCatalogInjected(input: CatalogInjectionInput): boolean {
   return !(input.metaSearchUsable && input.embeddingEnabled)
+}
+
+/**
+ * 当前会话此刻是否应注入 Skill 目录。
+ *
+ * 把「meta_search 是否可用」也收进来，是因为注入时机必须按会话判定而不能只看
+ * 全局配置：`meta_search` 可能被池/黑名单/常驻排除，但 Skill 目录仍必须存在，
+ * 否则模型既看不到名称、也没有入口召回。
+ *
+ * @param input - 配置、角色与召回集合。
+ * @returns 应注入时为 true。
+ */
+export function shouldInjectSkillCatalog(input: SkillToolUsabilityInput): boolean {
+  return isCatalogInjected({
+    metaSearchUsable: isToolUsable({
+      id: META_SEARCH_TOOL_ID,
+      config: input.config,
+      role: input.role,
+      recalled: input.recalled,
+    }),
+    embeddingEnabled: input.config.embedding.enabled,
+  })
 }

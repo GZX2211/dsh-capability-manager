@@ -31,7 +31,7 @@ function sources(patch: Partial<MetaSearchSources> = {}): MetaSearchSources {
 
 function dependencies(overrides: Partial<MetaSearchDependencies> = {}): MetaSearchDependencies {
   return {
-    sources: () => sources(),
+    sources: async () => sources(),
     record: () => {},
     ...overrides,
   }
@@ -110,7 +110,7 @@ describe('执行', () => {
   it('语义通道返回 Skill 索引条目', async () => {
     const tool = createMetaSearchTool(
       dependencies({
-        sources: () =>
+        sources: async () =>
           sources({
             embeddingEnabled: true,
             keywordHits: { tools: [], skills: [officeSkill.name] },
@@ -146,7 +146,7 @@ describe('执行', () => {
     const tool = createMetaSearchTool(
       dependencies({
         record,
-        sources: () =>
+        sources: async () =>
           sources({
             embeddingEnabled: true,
             keywordHits: { tools: [], skills: [officeSkill.name] },
@@ -175,7 +175,7 @@ describe('执行', () => {
     // 已经在上下文里而剔除——会话的工具已被收走，却永远召不回来。
     const tool = createMetaSearchTool(
       dependencies({
-        sources: () =>
+        sources: async () =>
           sources({
             tools: new Map([['pwsh', readSchema]]),
             // 当前可见的只有常驻的 meta_search 自己。

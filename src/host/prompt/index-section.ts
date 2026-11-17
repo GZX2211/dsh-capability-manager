@@ -1,12 +1,13 @@
 // src/host/prompt/index-section.ts
 //
-// 模式 A 的索引注入：把「有这个名字、大概干什么」告诉模型，但不给调用参数。
+// 模式 A 的工具索引注入：把「有这个名字、大概干什么」告诉模型，但不给调用参数。
 //
-// 两侧范围刻意不对称（§6.6）：
-//   · 工具索引只列**非常驻**——常驻工具的完整 schema 已经在 API tools 里
-//   · Skill 索引列**全部**池内项——Skill 没有别的可见通道，不给名字就无从召回
+// 工具索引只列**非常驻**：常驻工具的完整 schema 已经在 API tools 里，再列一遍
+// 纯属重复占上下文。
 //
-// M1 只实现工具侧；Skill 侧的数据通道在 M2 接入，渲染与范围判定已经就位。
+// Skill 不走这里：Skill 发现是异步的，而 section.text 是同步回调；Skill 目录由
+// skill-consumer/catalog-inject.ts 在 pre-step 以 durable user message 交付。
+// `renderIndex` 仍保留 Skill 段，供目录渲染复用同一套行格式。
 
 import type { CapabilityConfig, SessionRoleName } from '../../shared/config.ts'
 import { META_SEARCH_TOOL_ID } from '../../shared/config.ts'

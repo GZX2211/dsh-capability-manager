@@ -3,9 +3,10 @@ import {
   isCatalogInjected,
   isSkillEnabled,
   isSkillToolUsable,
+  shouldInjectSkillCatalog,
   SKILL_TOOL_NAME,
 } from '../../../src/host/skill-consumer/policy.ts'
-import { DEFAULT_CONFIG, type CapabilityConfig } from '../../../src/shared/config.ts'
+import { DEFAULT_CONFIG, type CapabilityConfig, type SessionRoleName } from '../../../src/shared/config.ts'
 
 function config(patch: Partial<CapabilityConfig>): CapabilityConfig {
   return { ...DEFAULT_CONFIG, ...patch }
@@ -87,5 +88,49 @@ describe('Skill 目录注入时机', () => {
   it('meta_search 不可用时注入：Skill 不能依赖召回', () => {
     expect(isCatalogInjected({ metaSearchUsable: false, embeddingEnabled: false })).toBe(true)
     expect(isCatalogInjected({ metaSearchUsable: false, embeddingEnabled: true })).toBe(true)
+  })
+})
+
+describe('按会话判定目录注入', () => {
+  function inject(
+    patch: Partial<CapabilityConfig>,
+    recalled: readonly string[] = [],
+    role: SessionRoleName | undefined = undefined,
+  ) {
+    return shouldInjectSkillCatalog({
+      config: config(patch),
+      role,
+      recalled: new Set(recalled),
+    })
+  }
+
+  it('默认形态注入', () => {
+    expect(inject({})).toBe(true)
+  })
+
+  it('语义检索开启且 meta_search 常驻时不注入', () => {
+    expect(inject({ resident: ['tool:meta_search', 'tool:skill'], embedding: { enabled: true } })).toBe(false)
+  })
+
+  it('meta_search 被排除出池时仍注入', () => {
+    expect(
+      inject({ excluded: ['tool:meta_search'], embedding: { enabled: true } }),
+    ).toBe(true)
+  })
+
+  it('meta_search 被该角色拉黑时仍注入', () => {
+    expect(
+      inject(
+        { blacklist: { router: ['tool:meta_search'], worker: [] }, embedding: { enabled: true } },
+        [],
+        'router',
+      ),
+    ).toBe(true)
+  })
+
+  it('meta_search 非常驻且未召回时仍注入', () => {
+    expect(
+      inject({ resident: ['tool:skill'], embedding: { enabled: true } }),
+    ).toBe(true)
   })
 })

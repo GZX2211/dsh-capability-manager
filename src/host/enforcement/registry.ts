@@ -112,6 +112,21 @@ export class EnforcementRegistry {
   /** agent 创建：先吸收全集再应用限制。顺序颠倒会让被掩掉的工具永远读不到。 */
   onAgentCreated(agent: AgentScope): void {
     this.run(() => {
+      // 同一个 agent 重复初始化（插件热启用、宿主重放 agent/created）时必须先释放
+      // 旧绑定的限制：否则新绑定的吸收会在旧 restriction 之下进行，present 只剩下
+      // 上一次的可见集，被掩掉的工具从此再也回不来。
+      const previous = this.bindings.get(agent.id)
+      if (previous !== undefined) {
+        this.bindings.delete(agent.id)
+        try {
+          previous.untrack?.()
+        } catch {
+          // 宿主可能已经回收了这个 effect；释放本身再做一次兜底。
+        }
+        previous.untrack = undefined
+        this.release(previous)
+      }
+
       const binding: Binding = { agent, present: new Set(), applied: [], applyKey: '' }
       this.bindings.set(agent.id, binding)
       // 兜底释放器只注册一次，且读 `binding.release` 的**当前值**。

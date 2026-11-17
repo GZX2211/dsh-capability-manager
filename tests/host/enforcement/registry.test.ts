@@ -160,6 +160,18 @@ describe('每 agent 的可见工具', () => {
     expect(host.visible('s1')).toEqual(['meta_search'])
   })
 
+  it('同一 agent 重复初始化时先释放旧限制，吸收到完整工具集', () => {
+    const host = createHost({ ...DEFAULT_CONFIG, resident: ['tool:meta_search'] })
+    for (const name of ['meta_search', 'read', 'write']) host.register(name)
+    host.createAgent('s1')
+
+    host.createAgent('s1')
+
+    // 旧限制若未释放，第二次吸收只会看到 meta_search，present 从此永久收缩。
+    expect(host.registry.diagnostics()[0]?.presentCount).toBe(3)
+    expect(host.visible('s1')).toEqual(['meta_search'])
+  })
+
   it('池外工具即使常驻也不可见', () => {
     const host = createHost({ ...DEFAULT_CONFIG, excluded: ['tool:read'], resident: ['tool:read', 'tool:write'] })
     for (const name of ['read', 'write']) host.register(name)

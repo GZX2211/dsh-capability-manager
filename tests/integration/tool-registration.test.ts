@@ -38,7 +38,7 @@ function defineTool(name: string) {
 
 function metaSearch() {
   return createMetaSearchTool({
-    sources: () => ({
+    sources: async () => ({
       tools: new Map(),
       skills: new Map(),
       seenTools: new Set(),
