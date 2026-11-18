@@ -81,6 +81,12 @@ const CSS = `
 .cm-settings-state { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary, inherit); }
 .cm-settings-notice { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, rgba(128,128,128,.9)); }
 .cm-settings-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l4, rgba(128,128,128,.28)); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, rgba(128,128,128,.05)); }
+/* 单个设置项不需要面板撑满高度：内容决定卡片高度。 */
+.cm-settings-panel--flush { flex: 0 0 auto; }
+.cm-settings-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+.cm-settings-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.cm-settings-row-title { font-size: 13px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary, inherit); }
+.cm-settings-switch { flex-shrink: 0; }
 .cm-blacklist-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 /* 清空在池标题栏里：它与「已禁用 n/m」回答同一件事，放在列表上方会多占一行高度。 */
 .cm-pane-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }

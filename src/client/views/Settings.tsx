@@ -6,12 +6,12 @@
 // 角色相关的分区只在检测到 `ctx.paRoles` 时出现（§3.6 BL-7）：没有角色判定时，
 // 黑名单既不生效也无从验证，摆一个能配置却不生效的面板比不显示更糟。
 
-import { Button, IconSearchOutlineRegular, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconSearchOutlineRegular, Input, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useCallback, useMemo, useState } from 'react'
-import type { ConfigPatchInput, SnapshotResponse } from '../../shared/api.ts'
+import type { ConfigPatchInput, EmbeddingStatus, SnapshotResponse } from '../../shared/api.ts'
 import type { CapabilityEntry, CapabilityId } from '../../shared/capability.ts'
 import type { SessionRoleName } from '../../shared/config.ts'
-import type { Translate } from '../i18n.ts'
+import type { Dict, Translate } from '../i18n.ts'
 import { bindingPatch, blacklistOf, blacklistRows, sessionRoleRows, type BindingChoice } from '../lib/roles.ts'
 import { KindFilter, type KindFilterValue } from '../components/KindFilter.tsx'
 import { RoleBlacklistPane } from '../components/RoleBlacklistPane.tsx'
@@ -25,16 +25,44 @@ const SECTION_LABELS: Record<SettingsSection, 'sectionRoles' | 'sectionSessions'
   embedding: 'sectionEmbedding',
 }
 
+/** 向量检索处在下载或加载阶段：此时开关不可再切。 */
+function isEmbeddingBusy(status: EmbeddingStatus['status']): boolean {
+  return status === 'downloading' || status === 'verifying'
+}
+
+/**
+ * 向量检索的状态文案。
+ *
+ * `idle` 且已开启是启动后、后台加载落地前的短暂状态，单独给一句「正在加载」，
+ * 否则界面会显示「关闭」而开关是开着的。
+ */
+function embeddingStateKey(embedding: EmbeddingStatus): keyof Dict {
+  switch (embedding.status) {
+    case 'downloading':
+      return 'embeddingStatusDownloading'
+    case 'verifying':
+      return 'embeddingStatusVerifying'
+    case 'failed':
+      return 'embeddingStatusFailed'
+    case 'ready':
+      return 'embeddingStateOn'
+    default:
+      return embedding.enabled ? 'embeddingStatusLoading' : 'embeddingStateOff'
+  }
+}
+
 export interface SettingsProps {
   snapshot: SnapshotResponse
   /** 已本地化的全量能力：与穿梭框共用同一份摘要，搜索词才能一致命中。 */
   capabilities: readonly CapabilityEntry[]
   saving: boolean
   onMutate: (patch: ConfigPatchInput) => void
+  /** 切换向量检索；开启会等模型下载与加载完成。 */
+  onToggleEmbedding: (enabled: boolean) => void
   t: Translate
 }
 
-export function Settings({ snapshot, capabilities, saving, onMutate, t }: SettingsProps) {
+export function Settings({ snapshot, capabilities, saving, onMutate, onToggleEmbedding, t }: SettingsProps) {
   const [section, setSection] = useState<SettingsSection>('roles')
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<KindFilterValue>('all')
@@ -165,13 +193,27 @@ export function Settings({ snapshot, capabilities, saving, onMutate, t }: Settin
           <section className="cm-settings-section" aria-label={t('embeddingTitle')}>
             <h2 className="cm-settings-title">{t('embeddingTitle')}</h2>
             <p className="cm-settings-intro">{t('embeddingIntro')}</p>
-            <p className="cm-settings-state">
-              {t(snapshot.embedding.enabled ? 'embeddingStateOn' : 'embeddingStateOff')}
-            </p>
-            {snapshot.embedding.message !== undefined ? (
-              <p className="cm-settings-notice">{snapshot.embedding.message}</p>
-            ) : null}
-            <p className="cm-settings-notice">{t('embeddingComingSoon')}</p>
+            <div className="cm-settings-panel cm-settings-panel--flush">
+              <div className="cm-settings-row">
+                <div className="cm-settings-row-main">
+                  <span className="cm-settings-row-title">{t('embeddingToggle')}</span>
+                  <span className="cm-settings-state">{t(embeddingStateKey(snapshot.embedding))}</span>
+                  {snapshot.embedding.message !== undefined ? (
+                    <span className="cm-settings-notice">{snapshot.embedding.message}</span>
+                  ) : null}
+                </div>
+                <Switch
+                  checked={snapshot.embedding.enabled}
+                  onChange={onToggleEmbedding}
+                  label={t('embeddingToggle')}
+                  // 下载与加载期间禁止再次切换：同一次开启请求还在进行中。
+                  disabled={saving || isEmbeddingBusy(snapshot.embedding.status)}
+                  title={t(snapshot.embedding.enabled ? 'embeddingToggleTooltipOn' : 'embeddingToggleTooltipOff')}
+                  className="cm-settings-switch"
+                />
+              </div>
+            </div>
+            <p className="cm-settings-notice">{t('embeddingHint')}</p>
           </section>
         )}
       </div>

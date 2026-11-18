@@ -18,7 +18,6 @@ import {
   type RevealResponse,
   type SnapshotResponse,
 } from '../../shared/api.ts'
-
 /** 网络层失败的稳定码：不属于服务端错误码表。 */
 const NETWORK_ERROR = 'network'
 
@@ -79,6 +78,26 @@ export async function revealCapability(id: string): Promise<RevealResponse> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id }),
   })) as RevealResponse
+}
+
+/**
+ * 开启向量检索。
+ *
+ * 同步等待模型下载与加载：首次开启可能持续几十秒，调用方应在请求期间显示进行中状态。
+ *
+ * @throws {ApiError} `embedding-download-failed`（模型源不可用）或 `embedding-unavailable`（本机无法加载运行时）。
+ */
+export async function enableEmbedding(): Promise<{ ok: true }> {
+  return (await requestJson(ROUTES.embeddingEnable, { method: 'POST' })) as { ok: true }
+}
+
+/**
+ * 关闭向量检索。
+ *
+ * @throws {ApiError} 写盘失败时抛出。
+ */
+export async function disableEmbedding(): Promise<{ ok: true }> {
+  return (await requestJson(ROUTES.embeddingDisable, { method: 'POST' })) as { ok: true }
 }
 
 async function requestJson(path: string, init: RequestInit = {}): Promise<unknown> {

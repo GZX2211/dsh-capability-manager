@@ -218,6 +218,9 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
               capabilities={capabilities}
               saving={snapshot.saving}
               onMutate={snapshot.mutate}
+              onToggleEmbedding={next => {
+                void snapshot.setEmbedding(next)
+              }}
               t={t}
             />
           )}

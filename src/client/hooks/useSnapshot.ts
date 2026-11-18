@@ -15,6 +15,8 @@ import type { ConfigPatch, ConfigPatchInput, SnapshotResponse } from '../../shar
 import {
   ApiError,
   createSkill as requestCreateSkill,
+  disableEmbedding as requestDisableEmbedding,
+  enableEmbedding as requestEnableEmbedding,
   fetchSnapshot,
   revealCapability,
   writeConfig,
@@ -41,6 +43,8 @@ export interface SnapshotHandle extends SnapshotState {
   createSkill: () => Promise<CapabilityEntry | undefined>
   /** 在系统文件管理器里打开某个自建能力的目录。 */
   reveal: (id: string) => Promise<void>
+  /** 切换向量检索；开启会等模型下载与加载完成。 */
+  setEmbedding: (enabled: boolean) => Promise<void>
 }
 
 /**
@@ -152,7 +156,31 @@ export function useSnapshot(describe: (error: unknown) => string): SnapshotHandl
     }
   }, [])
 
-  return { ...state, refresh: () => void read(), mutate, createSkill, reveal }
+  /**
+   * 切换向量检索。
+   *
+   * 开启是一次长请求（下载 24MB + 加载模型），期间保持 saving 让开关与其它写操作一起禁用。
+   * 失败时服务端会保持关闭，界面重新读一次快照即可拿到真实状态与失败原因。
+   */
+  const setEmbedding = useCallback(
+    async (enabled: boolean): Promise<void> => {
+      setState(previous => ({ ...previous, saving: true, writeError: undefined, notice: undefined }))
+      try {
+        if (enabled) await requestEnableEmbedding()
+        else await requestDisableEmbedding()
+        await read()
+        if (disposed.current) return
+        setState(previous => ({ ...previous, saving: false }))
+      } catch (error) {
+        if (disposed.current) return
+        setState(previous => ({ ...previous, saving: false, writeError: describeRef.current(error) }))
+        await read()
+      }
+    },
+    [read],
+  )
+
+  return { ...state, refresh: () => void read(), mutate, createSkill, reveal, setEmbedding }
 }
 
 /** 由 hook 结果推导界面可用的配置；快照尚未到达时返回 undefined。 */
