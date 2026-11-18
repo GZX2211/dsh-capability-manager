@@ -33,22 +33,32 @@ export interface FilterInput {
 }
 
 /**
+ * 搜索词是否命中能力。
+ *
+ * 对名称与摘要做大小写不敏感的子串匹配；首尾空白被忽略，空查询命中一切。
+ * 黑名单列表与穿梭框共用同一条匹配规则，避免两个搜索框对同一份数据给出不同结果。
+ *
+ * @param entry - 能力条目。
+ * @param query - 用户输入的搜索词。
+ * @returns 命中时为 true。
+ */
+export function matchesQuery(entry: Pick<CapabilityEntry, 'name' | 'summary'>, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (needle.length === 0) return true
+  return entry.name.toLowerCase().includes(needle) || entry.summary.toLowerCase().includes(needle)
+}
+
+/**
  * 按类型、来源与搜索词筛选能力。
  *
  * @param input - 全量能力、当前页面类型、来源筛选与搜索词。
  * @returns 按名称排序的结果；可能为空数组。
  */
 export function filterCapabilities(input: FilterInput): CapabilityEntry[] {
-  const query = input.query.trim().toLowerCase()
   return input.capabilities
     .filter(entry => entry.kind === input.kind)
     .filter(entry => input.source === 'all' || entry.source === input.source)
-    .filter(
-      entry =>
-        query.length === 0 ||
-        entry.name.toLowerCase().includes(query) ||
-        entry.summary.toLowerCase().includes(query),
-    )
+    .filter(entry => matchesQuery(entry, input.query))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 }
 
