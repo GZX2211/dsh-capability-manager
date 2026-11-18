@@ -13,6 +13,7 @@ import type { CapabilityEntry, CapabilityId } from '../../shared/capability.ts'
 import type { SessionRoleName } from '../../shared/config.ts'
 import type { Translate } from '../i18n.ts'
 import { bindingPatch, blacklistOf, blacklistRows, sessionRoleRows, type BindingChoice } from '../lib/roles.ts'
+import { KindFilter, type KindFilterValue } from '../components/KindFilter.tsx'
 import { RoleBlacklistPane } from '../components/RoleBlacklistPane.tsx'
 import { SessionRoleList } from '../components/SessionRoleList.tsx'
 
@@ -36,6 +37,7 @@ export interface SettingsProps {
 export function Settings({ snapshot, capabilities, saving, onMutate, t }: SettingsProps) {
   const [section, setSection] = useState<SettingsSection>('roles')
   const [query, setQuery] = useState('')
+  const [kind, setKind] = useState<KindFilterValue>('all')
 
   const rolesAvailable = snapshot.rolesAvailable
   const sections = useMemo<SettingsSection[]>(
@@ -49,12 +51,12 @@ export function Settings({ snapshot, capabilities, saving, onMutate, t }: Settin
   const config = snapshot.config
   const excludedIds = useMemo(() => new Set<CapabilityId>(config.excluded), [config.excluded])
   const routerRows = useMemo(
-    () => blacklistRows({ capabilities, config, role: 'router', query }),
-    [capabilities, config, query],
+    () => blacklistRows({ capabilities, config, role: 'router', kind, query }),
+    [capabilities, config, kind, query],
   )
   const workerRows = useMemo(
-    () => blacklistRows({ capabilities, config, role: 'worker', query }),
-    [capabilities, config, query],
+    () => blacklistRows({ capabilities, config, role: 'worker', kind, query }),
+    [capabilities, config, kind, query],
   )
   const sessions = useMemo(() => sessionRoleRows(snapshot.sessions, config), [snapshot.sessions, config])
 
@@ -102,6 +104,7 @@ export function Settings({ snapshot, capabilities, saving, onMutate, t }: Settin
             {rolesAvailable ? (
               <>
                 <div className="cm-settings-toolbar">
+                  <KindFilter value={kind} onChange={setKind} t={t} />
                   <Input
                     className="cm-search"
                     icon={<IconSearchOutlineRegular />}

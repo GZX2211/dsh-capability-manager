@@ -39,21 +39,21 @@ export function RoleBlacklistPane({
     <section className="cm-pane" aria-label={title}>
       <div className="cm-pane-header">
         <span className="cm-pane-title">{title}</span>
-        <span className="cm-pane-count">
-          {t('blacklistDisabled')} {blacklisted}/{total}
-        </span>
-      </div>
-
-      <div className="cm-pane-tools">
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={disabled || blacklisted === 0}
-          title={t('blacklistClearTooltip')}
-          onClick={() => onClear(role)}
-        >
-          {t('blacklistClear')}
-        </Button>
+        <div className="cm-pane-header-actions">
+          <Button
+            className="cm-pane-clear"
+            variant="ghost"
+            size="sm"
+            disabled={disabled || blacklisted === 0}
+            title={t('blacklistClearTooltip')}
+            onClick={() => onClear(role)}
+          >
+            {t('blacklistClear')}
+          </Button>
+          <span className="cm-pane-count">
+            {t('blacklistDisabled')} {blacklisted}/{total}
+          </span>
+        </div>
       </div>
 
       <div className="cm-pane-body">

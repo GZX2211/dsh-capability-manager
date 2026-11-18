@@ -85,6 +85,7 @@ export const zh = {
   rolesTitle: '角色黑名单',
   // 「黑名单优先级最高」是 §1.4 的判定顺序，界面必须明确说出来。
   rolesIntro: '黑名单优先级最高：它既能排除池内能力，也能排掉常驻能力。两个角色各自独立，未识别角色的会话不受任何黑名单影响。',
+  kindFilterLabel: '按能力类型筛选',
   roleRouter: 'Router（路由）',
   roleWorker: 'Worker（执行）',
   roleRouterShort: '路由',
@@ -215,6 +216,7 @@ export const en: Dict = {
 
   rolesTitle: 'Role blacklists',
   rolesIntro: 'A blacklist outranks everything: it excludes pooled capabilities and resident ones alike. The two roles are independent, and a session whose role is unknown is not affected by either blacklist.',
+  kindFilterLabel: 'Filter by capability type',
   roleRouter: 'Router',
   roleWorker: 'Worker',
   roleRouterShort: 'Router',

@@ -87,8 +87,13 @@ describe('手动绑定', () => {
 })
 
 describe('黑名单列表', () => {
-  function rows(current: CapabilityConfig, role: 'router' | 'worker', query = '') {
-    return blacklistRows({ capabilities: ENTRIES, config: current, role, query })
+  function rows(
+    current: CapabilityConfig,
+    role: 'router' | 'worker',
+    query = '',
+    kind: 'all' | 'tool' | 'skill' = 'all',
+  ) {
+    return blacklistRows({ capabilities: ENTRIES, config: current, role, query, kind })
   }
 
   it('已禁用的置顶，组内保持字母序', () => {
@@ -131,9 +136,53 @@ describe('黑名单列表', () => {
 
   it('不修改传入的能力顺序', () => {
     const entries = [...ENTRIES]
-    blacklistRows({ capabilities: entries, config: DEFAULT_CONFIG, role: 'router', query: '' })
+    blacklistRows({ capabilities: entries, config: DEFAULT_CONFIG, role: 'router', query: '', kind: 'all' })
 
     expect(entries.map(entry => entry.name)).toEqual(ENTRIES.map(entry => entry.name))
+  })
+})
+
+describe('黑名单的类型筛选', () => {
+  function rows(
+    current: CapabilityConfig,
+    kind: 'all' | 'tool' | 'skill',
+    query = '',
+  ) {
+    return blacklistRows({ capabilities: ENTRIES, config: current, role: 'router', query, kind })
+  }
+
+  it('只看工具时只留工具', () => {
+    expect(rows(DEFAULT_CONFIG, 'tool').rows.map(entry => entry.name)).toEqual(['bash', 'read'])
+  })
+
+  it('只看技能时只留技能', () => {
+    expect(rows(DEFAULT_CONFIG, 'skill').rows.map(entry => entry.name)).toEqual(['office'])
+  })
+
+  it('全部时三类都留', () => {
+    expect(rows(DEFAULT_CONFIG, 'all').total).toBe(3)
+  })
+
+  it('计数只统计类型筛选后的行', () => {
+    const current = config({ blacklist: { router: ['tool:read', 'skill:office'], worker: [] } })
+
+    expect(rows(current, 'tool')).toMatchObject({ blacklisted: 1, total: 2 })
+    expect(rows(current, 'skill')).toMatchObject({ blacklisted: 1, total: 1 })
+  })
+
+  it('类型与搜索词叠加生效', () => {
+    expect(rows(DEFAULT_CONFIG, 'skill', '写文档').rows.map(entry => entry.name)).toEqual(['office'])
+    expect(rows(DEFAULT_CONFIG, 'tool', '写文档').rows).toEqual([])
+  })
+
+  it('类型筛选后仍保持已禁用置顶', () => {
+    const current = config({ blacklist: { router: ['tool:read'], worker: [] } })
+
+    expect(rows(current, 'tool').rows.map(entry => entry.name)).toEqual(['read', 'bash'])
+  })
+
+  it('类型筛选后无命中时是空列表与零计数', () => {
+    expect(rows(DEFAULT_CONFIG, 'skill', 'bash')).toMatchObject({ rows: [], blacklisted: 0, total: 0 })
   })
 })
 

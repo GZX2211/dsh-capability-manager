@@ -7,7 +7,7 @@
 // 的状态」与「Host 实际判定的状态」用同一份推导，而不是各自解释配置。
 
 import type { SessionRoleSnapshot, ConfigPatchInput } from '../../shared/api.ts'
-import type { CapabilityEntry, CapabilityId } from '../../shared/capability.ts'
+import type { CapabilityEntry, CapabilityId, CapabilityKind } from '../../shared/capability.ts'
 import type { CapabilityConfig, RoleSource, SessionRoleName } from '../../shared/config.ts'
 import { matchesQuery } from './filter.ts'
 
@@ -65,6 +65,8 @@ export interface BlacklistRowsInput {
   capabilities: readonly CapabilityEntry[]
   config: CapabilityConfig
   role: SessionRoleName
+  /** 能力类型筛选；`all` 表示不按类型过滤。 */
+  kind: CapabilityKind | 'all'
   query: string
 }
 
@@ -83,12 +85,13 @@ export interface BlacklistRows {
  * 已禁用的置顶：这个面板回答的第一个问题是「我禁用了什么」，而不是「按字母排第几」。
  * 组内保持名称序，让打开面板时行不会乱跳。
  *
- * @param input - 全量能力、配置、角色与搜索词。
+ * @param input - 全量能力、配置、角色、类型筛选与搜索词。
  * @returns 行、禁用数与总数；输入不被修改。
  */
 export function blacklistRows(input: BlacklistRowsInput): BlacklistRows {
   const blacklisted = blacklistOf(input.config, input.role)
   const matched = input.capabilities
+    .filter(entry => input.kind === 'all' || entry.kind === input.kind)
     .filter(entry => matchesQuery(entry, input.query))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 

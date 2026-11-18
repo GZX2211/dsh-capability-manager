@@ -77,13 +77,15 @@ const CSS = `
 .cm-settings-section { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .cm-settings-title { margin: 0; font-size: 14px; line-height: 22px; font-weight: 600; color: var(--dsw-alias-label-primary, inherit); }
 .cm-settings-intro { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.95)); }
-.cm-settings-toolbar { display: flex; align-items: center; justify-content: flex-end; }
+.cm-settings-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .cm-settings-state { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary, inherit); }
 .cm-settings-notice { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, rgba(128,128,128,.9)); }
 .cm-settings-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l4, rgba(128,128,128,.28)); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, rgba(128,128,128,.05)); }
 .cm-blacklist-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.cm-pane-tools { display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; padding: 4px 8px 0; }
-.cm-pane-tools > button { height: 26px; font-size: 12px; line-height: 18px; }
+/* 清空在池标题栏里：它与「已禁用 n/m」回答同一件事，放在列表上方会多占一行高度。 */
+.cm-pane-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.cm-pane-clear { height: 24px; padding: 0 8px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.95)); }
+.cm-pane-clear:hover:not(:disabled) { color: var(--dsw-alias-label-primary, inherit); }
 .cm-tag-anchor { display: inline-flex; }
 .cm-session-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 6px; }
 .cm-session-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; }

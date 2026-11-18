@@ -44,8 +44,7 @@ export function BlacklistRow({
       </Tooltip>
 
       <div className="cm-row-tags">
-        <Tag tone="outline">{t(entry.kind === 'tool' ? 'kindTool' : 'kindSkill')}</Tag>
-        <Tag tone="outline">{t(SOURCE_LABELS[entry.source])}</Tag>
+        {/* 顺序固定为「池外 → 类型 → 来源」：最需要先看到的是「它此刻根本不会生效」。 */}
         {excludedFromPool ? (
           <Tooltip label={t('blacklistExcludedHint')} side="top">
             <span className="cm-tag-anchor">
@@ -53,6 +52,8 @@ export function BlacklistRow({
             </span>
           </Tooltip>
         ) : null}
+        <Tag tone="outline">{t(entry.kind === 'tool' ? 'kindTool' : 'kindSkill')}</Tag>
+        <Tag tone="outline">{t(SOURCE_LABELS[entry.source])}</Tag>
       </div>
 
       <div className="cm-row-actions">
