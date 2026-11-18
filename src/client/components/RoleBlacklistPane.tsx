@@ -6,6 +6,7 @@
 // 「这个角色禁用了什么」是分开的两个问题，并排能一眼比较，也不会让同一行承载两种状态。
 
 import { Button, IconLoadingOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { Ref, UIEventHandler } from 'react'
 import type { CapabilityEntry, CapabilityId } from '../../shared/capability.ts'
 import type { SessionRoleName } from '../../shared/config.ts'
 import type { Translate } from '../i18n.ts'
@@ -27,13 +28,17 @@ export interface RoleBlacklistPaneProps {
   disabled: boolean
   /** 数据未到位时显示占位而不是空态。 */
   ready: boolean
+  /** 列表滚动容器；两个面板共用一组 ref 以同步滚动。 */
+  listRef?: Ref<HTMLDivElement>
+  onListScroll?: UIEventHandler<HTMLDivElement>
   onToggle: (role: SessionRoleName, id: CapabilityId, next: boolean) => void
   onClear: (role: SessionRoleName) => void
   t: Translate
 }
 
 export function RoleBlacklistPane({
-  role, title, rows, blacklist, blacklisted, total, excludedIds, disabled, ready, onToggle, onClear, t,
+  role, title, rows, blacklist, blacklisted, total, excludedIds, disabled, ready,
+  listRef, onListScroll, onToggle, onClear, t,
 }: RoleBlacklistPaneProps) {
   return (
     <section className="cm-pane" aria-label={title}>
@@ -68,7 +73,7 @@ export function RoleBlacklistPane({
             <span className="cm-pane-empty-hint">{t('emptyHint')}</span>
           </div>
         ) : (
-          <div className="cm-pane-list" role="list" aria-label={title}>
+          <div className="cm-pane-list" role="list" aria-label={title} ref={listRef} onScroll={onListScroll}>
             {rows.map(entry => (
               <div role="listitem" key={entry.id}>
                 <BlacklistRow
