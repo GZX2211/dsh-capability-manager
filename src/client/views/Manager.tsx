@@ -10,6 +10,7 @@ import { Button, IconLoadingOutlineRegular, IconQuestionOutlineRegular, IconRefr
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { CapabilityKind } from '../../shared/capability.ts'
 import { ApiError } from '../lib/http.ts'
+import { localizeCapabilities } from '../lib/capability-text.ts'
 import { filterCapabilities, type SourceFilterValue } from '../lib/filter.ts'
 import { countByPool, partitionByPool, sortPinnedFirst, sortResidentFirst } from '../lib/transfer.ts'
 import { useSnapshot } from '../hooks/useSnapshot.ts'
@@ -43,11 +44,15 @@ function tabItems(t: Translate): [SegmentedTab<TabValue>, ...SegmentedTab<TabVal
 
 export interface ManagerProps {
   t: Translate
+  /**
+   * 当前界面语言码；每次渲染现取，切换语言后本地化摘要随之更新。
+   */
+  currentLanguage: () => string
   /** 新会话 + 预填创建引导语；返回 false 表示当前环境没有该入口。 */
   onCreateWithAgent: () => boolean
 }
 
-export function Manager({ t, onCreateWithAgent }: ManagerProps) {
+export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps) {
   const [tab, setTab] = useState<TabValue>('tools')
   const [source, setSource] = useState<SourceFilterValue>('all')
   const [query, setQuery] = useState('')
@@ -79,15 +84,23 @@ export function Manager({ t, onCreateWithAgent }: ManagerProps) {
     if (capabilityKind === 'skill' && source === 'mcp') setSource('all')
   }, [capabilityKind, source])
 
+  // 官方能力的描述只有英文原文：展示前按当前语言覆盖，自建与 MCP 保持原文。
+  // 放在筛选之前，中文界面的搜索词才能匹配到中文摘要。
+  const language = currentLanguage()
+  const capabilities = useMemo(
+    () => localizeCapabilities(snapshot.snapshot?.capabilities ?? [], language),
+    [snapshot.snapshot, language],
+  )
+
   const visible = useMemo(
     () =>
       filterCapabilities({
-        capabilities: snapshot.snapshot?.capabilities ?? [],
+        capabilities,
         kind: capabilityKind,
         source,
         query,
       }),
-    [snapshot.snapshot, capabilityKind, source, query],
+    [capabilities, capabilityKind, source, query],
   )
 
   const config = snapshot.snapshot?.config

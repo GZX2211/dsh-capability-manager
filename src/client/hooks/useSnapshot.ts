@@ -53,26 +53,46 @@ export function useSnapshot(describe: (error: unknown) => string): SnapshotHandl
   const [state, setState] = useState<SnapshotState>({ saving: false })
   const disposed = useRef(false)
   const revision = useRef(0)
+  /**
+   * 读取代次：每次发起读取时自增，响应回来时只有仍是最新的那次可以落状态。
+   *
+   * 没有它时，写操作之前发出的读取可能晚于写操作之后的读取返回，
+   * 用旧事实把刚创建出来的条目覆盖掉——表现就是创建后刷新也看不到新行。
+   */
+  const readSeq = useRef(0)
+  const describeRef = useRef(describe)
+  describeRef.current = describe
 
-  const load = useCallback(async (): Promise<void> => {
+  /**
+   * 读一次快照并落状态。
+   *
+   * describe 走 ref 而不是依赖：它随渲染变化，若作为依赖，挂载效应会在每次渲染
+   * 后重跑，界面就变成「点一下就自动刷新一次」。
+   *
+   * @returns 写入状态的快照；本次读取已过期（卸载或有更新的读取）时为 undefined。
+   */
+  const read = useCallback(async (): Promise<SnapshotResponse | undefined> => {
+    const seq = ++readSeq.current
     try {
       const snapshot = await fetchSnapshot()
-      if (disposed.current) return
+      if (disposed.current || seq !== readSeq.current) return undefined
       revision.current = snapshot.revision
       setState(previous => ({ ...previous, snapshot, error: undefined }))
+      return snapshot
     } catch (error) {
-      if (disposed.current) return
-      setState(previous => ({ ...previous, error: describe(error) }))
+      if (disposed.current || seq !== readSeq.current) return undefined
+      setState(previous => ({ ...previous, error: describeRef.current(error) }))
+      return undefined
     }
-  }, [describe])
+  }, [])
 
   useEffect(() => {
     disposed.current = false
-    void load()
+    void read()
     return () => {
       disposed.current = true
     }
-  }, [load])
+  }, [read])
 
   const mutate = useCallback(
     async (patch: ConfigPatchInput): Promise<void> => {
@@ -81,22 +101,22 @@ export function useSnapshot(describe: (error: unknown) => string): SnapshotHandl
         // 类型上是联合类型，revision 由 hook 统一补齐：调用方不该自己记版本号。
         const result = await writeConfig({ ...patch, revision: revision.current } as ConfigPatch)
         revision.current = result.revision
-        const snapshot = await fetchSnapshot()
+        // 写成功后的读取顺带作废写之前发出的读取，避免旧快照覆盖新事实。
+        await read()
         if (disposed.current) return
-        revision.current = snapshot.revision
-        setState({ snapshot, saving: false })
+        setState(previous => ({ ...previous, saving: false }))
       } catch (error) {
         if (disposed.current) return
         if (error instanceof ApiError && error.code === 'revision-conflict') {
           // 别人改过了：重新读一次，让用户基于新状态重新决定。
-          setState(previous => ({ ...previous, saving: false, notice: describe(error) }))
-          await load()
+          setState(previous => ({ ...previous, saving: false, notice: describeRef.current(error) }))
+          await read()
           return
         }
-        setState(previous => ({ ...previous, saving: false, writeError: describe(error) }))
+        setState(previous => ({ ...previous, saving: false, writeError: describeRef.current(error) }))
       }
     },
-    [describe, load],
+    [read],
   )
 
   const createSkill = useCallback(async (): Promise<CapabilityEntry | undefined> => {
@@ -104,23 +124,23 @@ export function useSnapshot(describe: (error: unknown) => string): SnapshotHandl
     try {
       const created = await requestCreateSkill(revision.current)
       revision.current = created.revision
-      const snapshot = await fetchSnapshot()
+      // Skill 文件此刻才落盘：必须等创建返回后再读，快照里才可能有新条目。
+      await read()
       if (disposed.current) return created.capability
-      revision.current = snapshot.revision
-      setState({ snapshot, saving: false })
+      setState(previous => ({ ...previous, saving: false }))
       return created.capability
     } catch (error) {
       if (disposed.current) return undefined
       if (error instanceof ApiError && error.code === 'revision-conflict') {
         // 与写配置同一条恢复路径：重新读一次，让用户基于新状态重来。
-        setState(previous => ({ ...previous, saving: false, notice: describe(error) }))
-        await load()
+        setState(previous => ({ ...previous, saving: false, notice: describeRef.current(error) }))
+        await read()
         return undefined
       }
-      setState(previous => ({ ...previous, saving: false, writeError: describe(error) }))
+      setState(previous => ({ ...previous, saving: false, writeError: describeRef.current(error) }))
       return undefined
     }
-  }, [describe, load])
+  }, [read])
 
   const reveal = useCallback(async (id: string): Promise<void> => {
     try {
@@ -128,15 +148,14 @@ export function useSnapshot(describe: (error: unknown) => string): SnapshotHandl
     } catch (error) {
       if (disposed.current) return
       // 打开目录不改配置，因此不进入 saving 状态，只把失败摆到用户面前。
-      setState(previous => ({ ...previous, writeError: describe(error) }))
+      setState(previous => ({ ...previous, writeError: describeRef.current(error) }))
     }
-  }, [describe])
+  }, [])
 
-  return { ...state, refresh: () => void load(), mutate, createSkill, reveal }
+  return { ...state, refresh: () => void read(), mutate, createSkill, reveal }
 }
 
 /** 由 hook 结果推导界面可用的配置；快照尚未到达时返回 undefined。 */
 export function configOf(snapshot: SnapshotResponse | undefined): CapabilityConfig | undefined {
   return snapshot?.config
 }
-

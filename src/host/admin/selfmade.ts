@@ -35,6 +35,13 @@ export interface CreateSkillActionDeps {
   baseName?: string
   /** 初始描述；缺省 {@link DEFAULT_SKILL_DESCRIPTION}。 */
   description?: string
+  /**
+   * 创建成功后立即通知技能注册表丢缓存。
+   *
+   * 目录监听是去抖的：创建请求返回时注册表缓存里仍是创建前的目录，
+   * 界面紧接着发出的刷新会命中旧缓存，看不到刚建好的条目。
+   */
+  onCreated?: () => void
   log?: (message: string) => void
 }
 
@@ -75,6 +82,9 @@ export function createSkillAction(deps: CreateSkillActionDeps, body: unknown): C
 
   const result = deps.store.write(next, revision)
   if (result.ok) {
+    // 文件与配置都已落盘，注册表缓存里却还是创建前的目录；在这里同步失效，
+    // 之后到达的刷新才读得到新条目。
+    deps.onCreated?.()
     const capability: CapabilityEntry = {
       id,
       kind: 'skill',

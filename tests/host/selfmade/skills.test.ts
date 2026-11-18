@@ -232,6 +232,30 @@ describe('自建 Skill provider', () => {
     skills.dispose()
   })
 
+  it('notifyChanged 立即通知订阅者，不等文件监听的去抖', () => {
+    const root = stateDir()
+    const skills = create(root)
+    let changes = 0
+    skills.onChange(() => { changes += 1 })
+
+    skills.notifyChanged()
+
+    expect(changes).toBe(1)
+    skills.dispose()
+  })
+
+  it('dispose 之后 notifyChanged 不再通知', () => {
+    const root = stateDir()
+    const skills = create(root)
+    let changes = 0
+    skills.onChange(() => { changes += 1 })
+    skills.dispose()
+
+    skills.notifyChanged()
+
+    expect(changes).toBe(0)
+  })
+
   it('监听文件变化时通知变更；dispose 后不再通知', async () => {
     const root = stateDir()
     const skills = create(root, true)

@@ -91,6 +91,39 @@ describe('手动创建 Skill', () => {
     expect(store.revision).toBe(0)
   })
 
+  it('创建成功后立即通知技能注册表丢缓存', () => {
+    const dir = stateDir()
+    const store = openStore(dir)
+    let notified = 0
+
+    createSkillAction({ store, stateDir: dir, onCreated: () => { notified += 1 } }, { revision: store.revision })
+
+    expect(notified).toBe(1)
+  })
+
+  it('revision 冲突时不通知', () => {
+    const dir = stateDir()
+    const store = openStore(dir)
+    let notified = 0
+
+    const outcome = createSkillAction({ store, stateDir: dir, onCreated: () => { notified += 1 } }, { revision: 99 })
+
+    expect(outcome.status).toBe(409)
+    expect(notified).toBe(0)
+  })
+
+  it('骨架创建失败时不通知', () => {
+    const dir = stateDir()
+    const store = openStore(dir)
+    let notified = 0
+    writeFileSync(join(dir, 'skills'), 'not a directory', 'utf8')
+
+    const outcome = createSkillAction({ store, stateDir: dir, onCreated: () => { notified += 1 } }, { revision: store.revision })
+
+    expect(outcome.status).toBe(500)
+    expect(notified).toBe(0)
+  })
+
   it('三角测量：基名与描述可由调用方覆盖', () => {
     const dir = stateDir()
     const store = openStore(dir)

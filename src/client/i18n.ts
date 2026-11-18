@@ -7,20 +7,20 @@ export const NS = 'capability manager'
 export const zh = {
   nav: '能力管理',
   pageTitle: '能力管理',
-  pageSubtitle: '管理工具与 Skill 的可用范围与初始配置',
+  pageSubtitle: '管理工具与技能的可用范围与初始配置',
   refresh: '刷新',
   refreshTooltip: '重新读取当前配置',
 
   createCapability: '创建能力',
   createCapabilityMenu: '选择创建方式',
   createWithAgent: '让 Agent 创建能力',
-  createSkillManually: '手动创建 Skill',
+  createSkillManually: '手动创建技能',
   createUnavailable: '当前环境没有可用的新会话入口',
   // 冒号后的空格是给用户续写的位置，不要删。
   createPrompt: '帮我创建一个 skill / 工具 / MCP: ',
 
   tabTools: '工具',
-  tabSkills: 'Skill',
+  tabSkills: '技能',
   tabSettings: '设置',
 
   filterAll: '全部',
@@ -35,12 +35,12 @@ export const zh = {
   helpTooltip: '查看说明',
   helpIntro: '它决定模型一开始能看到什么：默认只给两个入口，其余能力按需召回。',
   helpPoolTitle: '能力池与排出池',
-  helpPoolBody: '中间的分界可以左右拖动。点右侧的减号把能力移出能力池，它便不可调用、不可召回、也不出现在索引里；点左侧的加号把它放回去。你在输入框用 /名称 直接加载 Skill 时不受能力池限制，显式使用优先。',
+  helpPoolBody: '中间的分界可以左右拖动。点右侧的减号把能力移出能力池，它便不可调用、不可召回、也不出现在索引里；点左侧的加号把它放回去。你在输入框用 /名称 直接加载技能时不受能力池限制，显式使用优先。',
   helpResidentTitle: '常驻',
   helpResidentBody: '能力池行内的开关控制常驻：开启后模型一开始就能直接使用；关闭后只能经 meta_search 按名字召回。',
   helpRecallTitle: '召回',
   helpRecallBody: 'meta_search 用名称或名称组取回能力的完整定义；召回的结果从下一步开始可调用。',
-  helpModeA: '当前模式：A（向量检索关闭）。面板会注入工具索引与 Skill 目录，只含名称与用途摘要。',
+  helpModeA: '当前模式：A（向量检索关闭）。面板会注入工具索引与技能目录，只含名称与用途摘要。',
   helpModeB: '当前模式：B（向量检索开启）。不注入索引，靠关键词做语义召回。',
   helpClose: '知道了',
 
@@ -75,7 +75,7 @@ export const zh = {
   warningTitle: '注意',
   warningMetaSearchNotResident: 'meta_search 不在常驻里，池内那些非常驻能力将无法被召回。',
   warningMetaSearchExcluded: 'meta_search 已被排除出池，完全无法召回，模型只能用常驻能力工作。',
-  warningSkillExcluded: 'skill 已被排除出池，所有 Skill 都无法加载。',
+  warningSkillExcluded: 'skill 已被排除出池，所有技能都无法加载。',
   warningResidentEmpty: '常驻为空：模型启动时没有任何直接可用的能力。',
   warningBlacklistExcludesResident: '黑名单排除了常驻能力，这些能力对该角色将不可用。',
 
@@ -171,8 +171,13 @@ export const en: Dict = {
   saved: 'Saved',
 }
 
+/** 语言码是否中文；词典选择与能力摘要本地化共用同一判定。 */
+export function isChinese(language: string | null | undefined): boolean {
+  return String(language ?? '').toLowerCase().startsWith('zh')
+}
+
 export function text(language: string | null | undefined): Dict {
-  return String(language ?? '').toLowerCase().startsWith('zh') ? zh : en
+  return isChinese(language) ? zh : en
 }
 
 /** 按语言码给出该语言的翻译函数。 */

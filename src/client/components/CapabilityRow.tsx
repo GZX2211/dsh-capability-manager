@@ -40,10 +40,13 @@ export function CapabilityRow({ entry, config, side, disabled, onAdd, onRemove, 
 
   return (
     <div className="cm-row" data-row-key={entry.id}>
-      <div className="cm-row-main">
-        <span className="cm-row-name">{entry.name}</span>
-        {entry.summary.length > 0 ? <span className="cm-row-summary">{entry.summary}</span> : null}
-      </div>
+      {/* 摘要只显示一行：被截断时在条目上悬停可读全文，未截断则不出提示。 */}
+      <Tooltip label={entry.summary} side="top" delayMs={300} onlyWhenClipped portal>
+        <div className="cm-row-main">
+          <span className="cm-row-name">{entry.name}</span>
+          {entry.summary.length > 0 ? <span className="cm-row-summary">{entry.summary}</span> : null}
+        </div>
+      </Tooltip>
 
       <div className="cm-row-tags">
         <Tag tone="outline">{t(SOURCE_LABELS[entry.source])}</Tag>

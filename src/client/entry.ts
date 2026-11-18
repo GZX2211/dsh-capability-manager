@@ -9,7 +9,7 @@ import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { PanelIcon } from './components/PanelIcon.tsx'
 import type { ClientContext } from './context.ts'
 import { PANEL_ID, PANEL_ORDER } from './definition.ts'
-import { detectLanguage, translateFor, type Translate } from './i18n.ts'
+import { detectLanguage, text, type Translate } from './i18n.ts'
 import { installStyles } from './style.ts'
 import { Manager } from './views/Manager.tsx'
 
@@ -21,7 +21,11 @@ export const inject = ['slots', 'locale']
 export function apply(ctx: ClientContext): void {
   // 语言由 locale 服务给出，文案由本包词典给出：某一份字典缺失时只有那一处回退，
   // 不会让整个面板消失。
-  const translate = (): Translate => translateFor(detectLanguage(ctx.locale.getLocale()))
+  const currentLanguage = (): string => detectLanguage(ctx.locale.getLocale())
+
+  // 注入面只在首次渲染时求值一次，而语言可能在此之后切换；
+  // 因此翻译函数每次调用都重新读语言，宿主因 locale 变更重渲染时即可换成新文案。
+  const translate = (): Translate => key => text(currentLanguage())[key]
 
   /**
    * 新建会话并预填创建能力的引导语。
@@ -50,7 +54,7 @@ export function apply(ctx: ClientContext): void {
           {
             name: 'main',
             key: PANEL_ID as MainPanelId,
-            inject: () => ({ t: translate(), onCreateWithAgent: createWithAgent }),
+            inject: () => ({ t: translate(), currentLanguage, onCreateWithAgent: createWithAgent }),
           },
           Manager,
         ),

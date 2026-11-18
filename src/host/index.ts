@@ -369,7 +369,12 @@ export function apply(ctx: HostContext, config?: Config): void {
               })
             },
             writeConfig: patch => writeConfig(store, patch),
-            createSkill: body => createSkillAction({ store, stateDir, log }, body),
+            createSkill: body => createSkillAction({
+              store,
+              stateDir,
+              log,
+              onCreated: () => selfmadeSkills.notifyChanged(),
+            }, body),
             reveal: body => revealAction({
               stateDir,
               ownsTool: toolName => selfmadeTools.names().has(toolName),

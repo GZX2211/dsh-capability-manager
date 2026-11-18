@@ -212,18 +212,28 @@ export class SelfmadeSkills {
     }
   }
 
+  /**
+   * 立即通知订阅者目录已变，不等文件监听的去抖。
+   *
+   * 创建动作写完文件后直接调用：去抖窗口内注册表仍会命中创建前的目录缓存，
+   * 界面紧接着的刷新就会看不到刚建好的条目。
+   */
+  notifyChanged(): void {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener()
+      } catch (error) {
+        this.warn(`自建 Skill 变更通知失败：${describe(error)}`)
+      }
+    }
+  }
+
   private schedule(): void {
     if (this.closed || this.timer !== undefined) return
     this.timer = setTimeout(() => {
       this.timer = undefined
       if (this.closed) return
-      for (const listener of [...this.listeners]) {
-        try {
-          listener()
-        } catch (error) {
-          this.warn(`自建 Skill 变更通知失败：${describe(error)}`)
-        }
-      }
+      this.notifyChanged()
     }, this.options.debounceMs ?? DEFAULT_DEBOUNCE_MS)
     this.timer.unref?.()
   }
