@@ -2,8 +2,11 @@
 //
 // 能力来源判定：决定界面上的分组标签，以及这一项能不能被删除或编辑。
 //
-// MCP 工具名按官方 mcp-client 的约定形如 `<server>__<tool>`。判定必须完整匹配
-// 服务器名前缀，否则叫 `github` 的服务器会把 `github_enterprise__x` 也算成自己的。
+// MCP 工具有两种公开名形态，都要认：
+//   · `mcp__<server>__<tool>`——官方 mcp-client 现用形态（`mcp__` 是固定前缀）；
+//   · `<server>__<tool>`——早期约定，仍出现在既有配置与旧会话里。
+// 判定必须完整匹配服务器名，否则叫 `github` 的服务器会把 `github_enterprise__x`
+// 也算成自己的。
 
 import type { CapabilitySource } from '../../shared/capability.ts'
 
@@ -29,6 +32,7 @@ export function classifySource(name: string, context: SourceContext): Capability
   for (const server of context.mcpServers) {
     // 空服务器名的前缀会退化成 "__"，把所有双下划线开头的名字都吃掉。
     if (server.length === 0) continue
+    if (name.startsWith(`mcp__${server}__`)) return 'mcp'
     if (name.startsWith(`${server}__`)) return 'mcp'
   }
   return 'official'

@@ -37,6 +37,10 @@ export interface AdminTarget {
   enableEmbedding: () => Promise<ConfigOutcome> | ConfigOutcome
   /** 关闭向量检索。 */
   disableEmbedding: () => Promise<ConfigOutcome> | ConfigOutcome
+  /** 读一次 MCP 列表（含连接状态）；管理器缺席时也返回可展示的不可用说明。 */
+  mcpRead: () => Promise<unknown> | unknown
+  /** 提交一次 MCP 写操作；请求体未经校验，由 MCP 动作层收窄。 */
+  mcpWrite: (body: unknown) => Promise<ConfigOutcome> | ConfigOutcome
 }
 
 /**
@@ -110,6 +114,14 @@ async function dispatch(target: AdminTarget, request: IncomingMessage, response:
   if (path === ROUTES.embeddingDisable) {
     if (method !== 'POST') return sendMethodNotAllowed(response, 'POST')
     return postJson(request, response, () => target.disableEmbedding())
+  }
+
+  // MCP 面与其他端点同源：GET 读列表、POST 提交一次动作。
+  // 不引入 PUT/DELETE：写操作全是「提交一份内容」，语义与配置写入一致。
+  if (path === ROUTES.mcp) {
+    if (method === 'GET') return sendJson(response, 200, await target.mcpRead())
+    if (method !== 'POST') return sendMethodNotAllowed(response, 'GET, POST')
+    return postJson(request, response, target.mcpWrite)
   }
 
   return sendJson(response, 404, failure(ERROR_CODES.notFound, `no route for ${path}`))

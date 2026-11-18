@@ -30,6 +30,8 @@ function makeTarget(overrides: Partial<AdminTarget> = {}): AdminTarget {
     reveal: async () => ({ status: 200, body: { ok: true } }),
     enableEmbedding: async () => ({ status: 200, body: { ok: true } }),
     disableEmbedding: async () => ({ status: 200, body: { ok: true } }),
+    mcpRead: async () => ({ available: true, writable: true, servers: [] }),
+    mcpWrite: async () => ({ status: 200, body: { ok: true, servers: [] } }),
     ...overrides,
   }
 }
@@ -381,6 +383,62 @@ describe('向量检索开关端点', () => {
 
     expect(captured.status).toBe(403)
     expect(enableEmbedding).not.toHaveBeenCalled()
+  })
+})
+
+describe('MCP 连接管理端点', () => {
+  it('GET 返回连接列表', async () => {
+    const mcpRead = vi.fn(async () => ({
+      available: true,
+      writable: true,
+      servers: [{ name: 'playwright', configured: true, registered: false, enabled: true, transport: 'stdio' as const, target: 'npx pkg', state: 'connected' as const }],
+    }))
+
+    const { captured, json } = await call(makeTarget({ mcpRead }), { path: `${API_PREFIX}/mcp`, headers: sameOrigin })
+
+    expect(captured.status).toBe(200)
+    expect(json).toMatchObject({ available: true, writable: true, servers: [{ name: 'playwright', state: 'connected' }] })
+    expect(mcpRead).toHaveBeenCalledOnce()
+  })
+
+  it('POST 把请求体原样交给写操作并透传状态码', async () => {
+    const mcpWrite = vi.fn(async () => ({
+      status: 404,
+      body: { ok: false, code: 'mcp-unknown-server', message: 'unknown server: nope' },
+    }))
+    const action = { op: 'toggle', name: 'nope', enabled: true }
+
+    const { captured, json } = await call(makeTarget({ mcpWrite }), {
+      method: 'POST',
+      path: `${API_PREFIX}/mcp`,
+      headers: sameOrigin,
+      body: action,
+    })
+
+    expect(captured.status).toBe(404)
+    expect(json).toMatchObject({ ok: false, code: 'mcp-unknown-server' })
+    expect(mcpWrite).toHaveBeenCalledWith(action)
+  })
+
+  it('只接受 GET 与 POST，且受同源守卫保护', async () => {
+    const mcpRead = vi.fn()
+    const mcpWrite = vi.fn()
+
+    const wrongMethod = await call(makeTarget({ mcpRead, mcpWrite }), {
+      method: 'DELETE',
+      path: `${API_PREFIX}/mcp`,
+      headers: sameOrigin,
+    })
+    const wrongOrigin = await call(makeTarget({ mcpRead, mcpWrite }), {
+      method: 'POST',
+      path: `${API_PREFIX}/mcp`,
+      body: { op: 'delete', name: 'x' },
+    })
+
+    expect(wrongMethod.captured.status).toBe(405)
+    expect(wrongOrigin.captured.status).toBe(403)
+    expect(mcpRead).not.toHaveBeenCalled()
+    expect(mcpWrite).not.toHaveBeenCalled()
   })
 })
 

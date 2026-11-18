@@ -53,6 +53,10 @@ function createHost(options: {
   extraTools?: readonly string[]
   /** 已连接的 MCP 服务器名。 */
   mcpServers?: readonly string[]
+  /** 受控的官方 MCP 管理器替身：本插件的 MCP 面只读它。 */
+  mcpManager?: unknown
+  /** 受控的配置编辑器替身：MCP 写操作只经它落盘。 */
+  configEditor?: unknown
   /** 模拟 Personal Agent 的角色服务；缺省表示没有 `ctx.paRoles`。 */
   roles?: (sessionId: string) => 'router' | 'worker' | undefined
   /** 向量基础设施注入：测试用假嵌入器代替原生运行时与 24MB 模型。 */
@@ -160,9 +164,14 @@ function createHost(options: {
   const ctx = {
     logger: { warn: (...args: unknown[]) => { warnings.push(args.map(String).join(' ')) } },
     get: (name: string) => {
-      if (name === 'mcpManager' && options.mcpServers !== undefined) {
-        return { list: () => options.mcpServers?.map(server => ({ name: server })) }
+      if (name === 'mcpManager') {
+        if (options.mcpManager !== undefined) return options.mcpManager
+        if (options.mcpServers !== undefined) {
+          return { list: () => options.mcpServers?.map(server => ({ name: server })) }
+        }
+        return undefined
       }
+      if (name === 'configEditor') return options.configEditor
       if (name === 'paRoles' && options.roles !== undefined) {
         return { roleOf: (sessionId: string) => options.roles?.(sessionId) }
       }
@@ -801,3 +810,111 @@ function writeSelfmadeSkill(stateDir: string, name: string): void {
     'utf8',
   )
 }
+
+describe('MCP 连接管理面', () => {
+  const MCP_PATH = '/capability-manager/api/mcp'
+
+  /**
+   * 受控的官方 MCP 面：管理器读一份可变配置，编辑器把 change 的结果写回它。
+   *
+   * 这里替代的是官方服务边界（`ctx.mcpManager` / `ctx.configEditor`），
+   * 本插件的读取合并、动作变换与路由都是真实实现。
+   */
+  function controlledMcp(initial: Record<string, unknown> = {}) {
+    const state = { servers: initial }
+    const manager = {
+      list: () => Object.keys(state.servers).map(name => ({
+        name,
+        configured: true,
+        status: { state: 'connecting', attempt: 0 },
+      })),
+      config: { servers: { get: () => state.servers } },
+    }
+    const editor = {
+      entries: () => [{ options: { id: 'mcp-manager', name: '@deepseek-ai/dsh-mcp-manager' } }],
+      edit: async (_entry: unknown, change: (current: Record<string, unknown>) => Record<string, unknown>): Promise<void> => {
+        const next = change({ servers: state.servers })
+        state.servers = (next as { servers: Record<string, unknown> }).servers
+      },
+    }
+    return { state, manager, editor }
+  }
+
+  it('没有官方管理器时报告不可用，而不是一个空列表', async () => {
+    const host = createHost()
+
+    const response = await host.request('GET', MCP_PATH)
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ available: false, writable: false, servers: [], unavailableReason: 'manager-absent' })
+  })
+
+  it('管理器缺席时不提供写入口', async () => {
+    const host = createHost()
+
+    const response = await host.request('POST', MCP_PATH, { op: 'delete', name: 'x' })
+
+    expect(response.status).toBe(503)
+    expect(response.body).toMatchObject({ ok: false, code: 'mcp-unavailable' })
+  })
+
+  it('批量导入的服务器立刻出现在同一列表里', async () => {
+    const { manager, editor } = controlledMcp()
+    const host = createHost({ mcpManager: manager, configEditor: editor })
+
+    const written = await host.request('POST', MCP_PATH, {
+      op: 'import',
+      json: JSON.stringify({
+        mcpServers: {
+          playwright: { command: 'npx', args: ['-y', '@playwright/mcp@latest', '--headless'] },
+          remote: { type: 'http', url: 'https://mcp.example.com/mcp' },
+        },
+      }),
+    })
+
+    expect(written.status).toBe(200)
+    expect(written.body).toMatchObject({ ok: true })
+
+    const listed = await host.request('GET', MCP_PATH)
+    const body = listed.body as { available: boolean; writable: boolean; servers: { name: string; registered: boolean; enabled: boolean; state: string }[] }
+    expect(body.available).toBe(true)
+    expect(body.writable).toBe(true)
+    expect(body.servers.map(server => server.name)).toEqual(['playwright', 'remote'])
+    expect(body.servers[0]).toMatchObject({ registered: false, enabled: true, state: 'connecting' })
+  })
+
+  it('开关切换写回配置，条目本身保留', async () => {
+    const { state, manager, editor } = controlledMcp({
+      kino: { transport: 'stdio', command: 'D:\\kinocut\\kino.exe', args: [], env: {}, enabled: true },
+    })
+    const host = createHost({ mcpManager: manager, configEditor: editor })
+
+    const response = await host.request('POST', MCP_PATH, { op: 'toggle', name: 'kino', enabled: false })
+
+    expect(response.status).toBe(200)
+    expect(state.servers.kino).toMatchObject({ enabled: false, command: 'D:\\kinocut\\kino.exe' })
+  })
+
+  it('写入后的响应已包含最新列表，界面无需再读一次', async () => {
+    const { manager, editor } = controlledMcp()
+    const host = createHost({ mcpManager: manager, configEditor: editor })
+
+    const response = await host.request('POST', MCP_PATH, {
+      op: 'save',
+      form: { name: 'files', transport: 'stdio', commandLine: 'npx -y @modelcontextprotocol/server-filesystem', env: '', url: '', headers: '' },
+    })
+
+    expect(response.status).toBe(200)
+    expect((response.body as { servers: { name: string }[] }).servers.map(server => server.name)).toEqual(['files'])
+  })
+
+  it('未知服务器返回稳定错误码，而不是静默成功', async () => {
+    const { manager, editor } = controlledMcp()
+    const host = createHost({ mcpManager: manager, configEditor: editor })
+
+    const response = await host.request('POST', MCP_PATH, { op: 'delete', name: 'nope' })
+
+    expect(response.status).toBe(404)
+    expect(response.body).toMatchObject({ ok: false, code: 'mcp-unknown-server' })
+  })
+})

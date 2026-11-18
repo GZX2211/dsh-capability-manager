@@ -35,6 +35,8 @@ export const ROUTES = {
   embeddingEnable: `${API_PREFIX}/embedding/enable`,
   /** 关闭向量检索：释放会话并写回配置。 */
   embeddingDisable: `${API_PREFIX}/embedding/disable`,
+  /** MCP 连接管理：读列表（含连接状态）与提交一次写操作。 */
+  mcp: `${API_PREFIX}/mcp`,
 } as const
 
 /** 稳定错误码：客户端按码分支，不吞错。 */
@@ -54,6 +56,16 @@ export const ERROR_CODES = {
   revealFailed: 'reveal-failed',
   embeddingUnavailable: 'embedding-unavailable',
   embeddingDownloadFailed: 'embedding-download-failed',
+  /** 官方 MCP 管理器或配置编辑器未挂载：该环境没有可配置的 MCP 面。 */
+  mcpUnavailable: 'mcp-unavailable',
+  /** 表单本身不合法；`issues` 带出问题码。 */
+  mcpInvalidEntry: 'mcp-invalid-entry',
+  /** 导入的 mcp.json 无法执行；`reason` 带出导入原因码。 */
+  mcpImportInvalid: 'mcp-import-invalid',
+  /** 写入 profile 配置失败（Loader 校验或落盘）。 */
+  mcpWriteFailed: 'mcp-write-failed',
+  /** 目标服务器不在配置里。 */
+  mcpUnknownServer: 'mcp-unknown-server',
   internal: 'internal',
 } as const
 

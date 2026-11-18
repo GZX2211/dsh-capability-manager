@@ -25,13 +25,14 @@ export function HelpDialog({ open, embeddingEnabled, rolesAvailable, onClose, t 
       onClose={onClose}
       title={t('helpTitle')}
       closeLabel={t('helpClose')}
+      className="cm-dialog"
       footer={
         <Button variant="primary" onClick={onClose}>
           {t('helpClose')}
         </Button>
       }
     >
-      <div className="cm-help">
+      <div className="cm-help cm-dialog__scroll">
         <p>{t('helpIntro')}</p>
 
         <div className="cm-help-section">

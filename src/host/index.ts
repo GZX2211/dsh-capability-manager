@@ -30,6 +30,7 @@ import { collectSkills, type SkillSource } from './catalog/skills.ts'
 import { classifySource } from './catalog/source.ts'
 import { ConfigStore } from './config/store.ts'
 import type { HostContext } from './context.ts'
+import { readMcpServers, writeMcpServers } from './mcp/bridge.ts'
 import { EnforcementRegistry, type AgentScope } from './enforcement/registry.ts'
 import { RecalledStore, type SessionLike } from './enforcement/recalled.ts'
 import { renderIndex, selectToolIndex, shouldInjectIndex } from './prompt/index-section.ts'
@@ -450,6 +451,9 @@ export function apply(ctx: HostContext, config?: Config): void {
               await embedding.disable()
               return { status: 200, body: { ok: true } }
             },
+            // MCP 面读官方管理器、写官方配置编辑器：与 Agent / Settings 共用同一份配置。
+            mcpRead: () => readMcpServers(ctx),
+            mcpWrite: body => writeMcpServers(ctx, body),
           }),
         }),
       'capability-manager: http',
@@ -703,10 +707,13 @@ interface McpManagerLike {
 }
 
 /**
- * 已连接的 MCP 服务器名。
+ * 受管的 MCP 服务器名。
  *
  * 服务按需探测：MCP 客户端可能比本插件晚加载。读不到时只影响 `<server>__<tool>`
  * 的来源标签，不影响能力池本身。
+ *
+ * 列表含「连接中 / 未连接 / 已停用」的条目：来源判定问的是「这个命名空间是否由
+ * 受管服务器占用」，而不是「此刻是否连通」。
  *
  * @param ctx - 宿主上下文。
  * @returns 非空服务器名；失败时为空数组。

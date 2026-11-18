@@ -18,16 +18,33 @@ import {
   type RevealResponse,
   type SnapshotResponse,
 } from '../../shared/api.ts'
+import type { McpAction, McpForm, McpServersResponse, McpWriteResponse } from '../../shared/mcp.ts'
 /** 网络层失败的稳定码：不属于服务端错误码表。 */
 const NETWORK_ERROR = 'network'
 
+/** 服务端在错误体里附带的、供界面按码使用的细节。 */
+export interface ErrorDetails {
+  /** 表单问题码（`mcp-invalid-entry`）。 */
+  issues?: string[]
+  /** 导入原因码（`mcp-import-invalid`）。 */
+  reason?: string
+}
+
 export class ApiError extends Error {
+  /** 表单问题码：界面据此就地标出字段，而不是只显示一句总述。 */
+  readonly issues?: string[]
+  /** 导入原因码：界面据此给出对应的说明。 */
+  readonly reason?: string
+
   constructor(
     readonly code: string,
     message: string,
+    details: ErrorDetails = {},
   ) {
     super(message)
     this.name = 'ApiError'
+    this.issues = details.issues
+    this.reason = details.reason
   }
 }
 
@@ -100,6 +117,64 @@ export async function disableEmbedding(): Promise<{ ok: true }> {
   return (await requestJson(ROUTES.embeddingDisable, { method: 'POST' })) as { ok: true }
 }
 
+/**
+ * 读一次 MCP 服务器列表（含连接状态）。
+ *
+ * 管理器缺席不是错误：响应里 `available: false` 说明这个环境没有可配置的 MCP 面。
+ */
+export async function fetchMcpServers(): Promise<McpServersResponse> {
+  return (await requestJson(ROUTES.mcp)) as McpServersResponse
+}
+
+/**
+ * 保存一台 MCP 服务器（新建或覆盖）。
+ *
+ * @param form - 表单草稿；名称在配置里已存在时覆盖它。
+ * @throws {ApiError} `mcp-invalid-entry`（`issues` 带出字段问题）、`mcp-write-failed`。
+ */
+export async function saveMcpServer(form: McpForm): Promise<McpWriteResponse> {
+  return postMcp({ op: 'save', form })
+}
+
+/**
+ * 切换一台 MCP 服务器的启用意图。
+ *
+ * 关闭只卸载实例、保留条目；开启会立即挂载并在稍后进入连接状态。
+ *
+ * @throws {ApiError} `mcp-unknown-server`、`mcp-write-failed`。
+ */
+export async function toggleMcpServer(name: string, enabled: boolean): Promise<McpWriteResponse> {
+  return postMcp({ op: 'toggle', name, enabled })
+}
+
+/**
+ * 删除一台 MCP 服务器。
+ *
+ * @throws {ApiError} `mcp-unknown-server`、`mcp-write-failed`。
+ */
+export async function deleteMcpServer(name: string): Promise<McpWriteResponse> {
+  return postMcp({ op: 'delete', name })
+}
+
+/**
+ * 批量导入 `mcp.json`。
+ *
+ * @param json - 粘贴的 JSON 文本；同名条目覆盖内容并保留原启用意图。
+ * @throws {ApiError} `mcp-import-invalid`（`reason` 带出原因）、`mcp-write-failed`。
+ */
+export async function importMcpServers(json: string): Promise<McpWriteResponse> {
+  return postMcp({ op: 'import', json })
+}
+
+/** 四个写动作共用的提交方式：一次动作 = 一个 JSON 请求体。 */
+async function postMcp(action: McpAction): Promise<McpWriteResponse> {
+  return (await requestJson(ROUTES.mcp, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(action),
+  })) as McpWriteResponse
+}
+
 async function requestJson(path: string, init: RequestInit = {}): Promise<unknown> {
   const headers: Record<string, string> = {
     ...(init.headers as Record<string, string> | undefined),
@@ -122,10 +197,16 @@ async function requestJson(path: string, init: RequestInit = {}): Promise<unknow
   }
 
   if (!response.ok) {
-    const failure = body as Partial<ErrorResponse> | null
+    const failure = body as (Partial<ErrorResponse> & { issues?: unknown; reason?: unknown }) | null
     const code = typeof failure?.code === 'string' ? failure.code : ERROR_CODES.internal
     const message = typeof failure?.message === 'string' ? failure.message : `request failed with ${response.status}`
-    throw new ApiError(code, message)
+    const issues = Array.isArray(failure?.issues)
+      ? failure.issues.filter((item): item is string => typeof item === 'string')
+      : undefined
+    throw new ApiError(code, message, {
+      issues,
+      reason: typeof failure?.reason === 'string' ? failure.reason : undefined,
+    })
   }
   return body
 }

@@ -21,17 +21,19 @@ import { TransferPane } from '../components/TransferPane.tsx'
 import { WarningBar } from '../components/WarningBar.tsx'
 import { CreateCapabilityMenu } from '../components/CreateCapabilityMenu.tsx'
 import { Settings } from './Settings.tsx'
+import { Mcp } from './Mcp.tsx'
 import type { Translate } from '../i18n.ts'
 
-type TabValue = 'tools' | 'skills' | 'settings'
+type TabValue = 'tools' | 'skills' | 'mcp' | 'settings'
 
-const TABS: { value: TabValue; labelKey: 'tabTools' | 'tabSkills' | 'tabSettings' }[] = [
+const TABS: { value: TabValue; labelKey: 'tabTools' | 'tabSkills' | 'tabMcp' | 'tabSettings' }[] = [
   { value: 'tools', labelKey: 'tabTools' },
   { value: 'skills', labelKey: 'tabSkills' },
+  { value: 'mcp', labelKey: 'tabMcp' },
   { value: 'settings', labelKey: 'tabSettings' },
 ]
 
-/** 三个 tab 恒定存在，所以这里可以给出非空元组。 */
+/** 四个 tab 恒定存在，所以这里可以给出非空元组。 */
 function tabItems(t: Translate): [SegmentedTab<TabValue>, ...SegmentedTab<TabValue>[]] {
   const items = TABS.map(entry => ({
     value: entry.value,
@@ -69,6 +71,9 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
         if (error.code === 'bad-request' || error.code === 'unknown-capability') return t('writeForbidden')
         if (error.code === 'create-failed') return t('createFailed')
         if (error.code === 'not-owned' || error.code === 'reveal-failed') return t('openFolderFailed')
+        // MCP 面：不可用是环境差异（管理器/编辑器缺席），其余错误给官方原文——
+        // 原文说明了具体哪条字段被拒，翻译成泛化文案反而不可行动。
+        if (error.code === 'mcp-unavailable') return t('mcpUnavailableManager')
         return error.message
       }
       return error instanceof Error ? error.message : String(error)
@@ -225,6 +230,9 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
             />
           )}
         </div>
+      ) : tab === 'mcp' ? (
+        // MCP 面不经过能力快照：它读官方管理器，连接状态由分区自己轮询。
+        <Mcp describe={describe} t={t} />
       ) : (
         <>
           <div className="cm-toolbar">

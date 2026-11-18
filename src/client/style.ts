@@ -10,6 +10,10 @@
 // 构建链路没有 CSS Module 管线（客户端产物是单个 CJS 文件），因此样式集中
 // 在本文件；类名用 `cm-` 前缀隔离，避免与宿主样式串味。
 //
+// 模板字符串内不得出现反引号或 `${`：它们会提前结束 CSS 字面量，构建仍然成功，
+// 但客户端模块会在加载时抛错、整个面板（含侧栏入口）都不会注册。
+// tests/client/style.test.ts 用注入文本兜底这条约束。
+//
 // 双栏宽度由内联 CSS 变量 `--cm-split` 提供：分栏比例是状态，媒体查询需要
 // 覆盖它时只写 CSS 就够，不把布局决策散到两个地方。
 
@@ -110,6 +114,50 @@ const CSS = `
 .cm-help-mode { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.95)); }
 .cm-notice { margin: 0 20px 8px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-text-warning, #b45309); }
 
+/* ---- 本插件的弹窗尺寸：官方 Modal 默认 min(380px, 100%)，会把命令与说明压成多行。
+   本插件的两个弹窗（帮助 / MCP 配置）统一成同一宽度与同一套滚动边界。
+   双写类名是为了在宿主样式表后加载时仍压过它自己的 dialog 宽度。 ---- */
+.cm-dialog.cm-dialog { width: min(640px, 100%); }
+/* 弹窗内容超过视口时在卡片内部滚动：标题与底部操作始终留在视野里。 */
+.cm-dialog__scroll { max-height: min(60vh, 560px); overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+
+/* ---- MCP 分区：工具栏 + 单栏列表 + 配置弹窗 ---- */
+.cm-mcp { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* 「配置 MCP」与搜索框成组推到右侧；按钮在前，因为它是这一页的主操作。 */
+.cm-mcp-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.cm-mcp-actions .cm-search { margin-left: 0; }
+.cm-mcp-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 0.5px solid var(--dsw-alias-border-l2, rgba(128,128,128,.28)); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, rgba(128,128,128,.05)); }
+.cm-mcp-state { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0; }
+.cm-mcp-empty-title { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.95)); }
+.cm-mcp-empty-hint { max-width: 520px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.9)); }
+.cm-mcp-state-detail { max-width: 560px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.9)); overflow-wrap: anywhere; }
+/* 计数在主操作左侧，和筛选胶囊一起回答「有几台、连上几台」。 */
+.cm-mcp-counts { flex-shrink: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.9)); font-variant-numeric: tabular-nums; }
+
+.cm-mcp-dialog { display: flex; flex-direction: column; gap: 12px; }
+.cm-mcp-dialog-intro { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.95)); }
+.cm-mcp-dialog-modes { align-self: flex-start; }
+/* 名称与连接方式并排：两者都短，纵向堆叠只会把弹窗拉长。 */
+.cm-mcp-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.cm-mcp-field { display: flex; flex-direction: column; gap: 4px; }
+.cm-mcp-field-label { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.95)); }
+.cm-mcp-field-hint { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.85)); }
+/* 原生 textarea：官方原子包没有多行输入，这里只借宿主的输入材质。 */
+.cm-mcp-import-input { box-sizing: border-box; width: 100%; min-height: 120px; padding: 8px 10px; font: inherit; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary, inherit); background: var(--dsw-alias-bg-layer-2, rgba(128,128,128,.08)); border: 0.5px solid var(--dsw-alias-border-l2, rgba(128,128,128,.28)); border-radius: 8px; resize: vertical; }
+.cm-mcp-import-input:focus-visible { outline: none; border-color: var(--dsw-alias-brand-primary, rgba(64,128,255,.8)); }
+.cm-mcp-import-preview { display: flex; flex-direction: column; gap: 4px; }
+.cm-mcp-import-count { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.95)); }
+.cm-mcp-import-rows { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow-y: auto; }
+.cm-mcp-import-row { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 18px; }
+.cm-mcp-import-name { flex-shrink: 0; font-weight: 500; color: var(--dsw-alias-label-primary, inherit); }
+.cm-mcp-import-target { color: var(--dsw-alias-label-secondary, rgba(128,128,128,.9)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-mcp-issues { margin: 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 2px; }
+.cm-mcp-issue { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary, #d33); }
+.cm-mcp-dialog-footer { display: flex; align-items: center; gap: 8px; width: 100%; }
+.cm-mcp-dialog-spacer { flex: 1; }
+/* 删除是危险操作：用错误色描边，与主保存按钮明确区分。 */
+.cm-mcp-dialog-delete { color: var(--dsw-alias-state-error-primary, #d33); }
+
 @media (max-width: 900px) {
   .cm-transfer { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); row-gap: 12px; }
   .cm-splitter { display: none; }
@@ -117,6 +165,10 @@ const CSS = `
   .cm-settings { flex-direction: column; gap: 12px; }
   .cm-settings-nav { flex-direction: row; width: auto; overflow-x: auto; }
   .cm-blacklist-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  /* 窄屏时主操作与搜索各占一行，避免搜索框被压到不可用宽度。 */
+  .cm-mcp-actions { margin-left: 0; width: 100%; }
+  .cm-mcp-actions .cm-search { flex: 1; width: auto; }
+  .cm-mcp-grid { grid-template-columns: minmax(0, 1fr); }
 }
 `
 

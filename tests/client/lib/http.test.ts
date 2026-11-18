@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, createSkill, fetchSnapshot, revealCapability, writeConfig } from '../../../src/client/lib/http.ts'
+import {
+  ApiError,
+  createSkill,
+  deleteMcpServer,
+  fetchMcpServers,
+  fetchSnapshot,
+  importMcpServers,
+  revealCapability,
+  saveMcpServer,
+  toggleMcpServer,
+  writeConfig,
+} from '../../../src/client/lib/http.ts'
 import { REQUEST_HEADER, REQUEST_HEADER_VALUE, ROUTES } from '../../../src/shared/api.ts'
 
 const snapshot = {
@@ -166,5 +177,54 @@ describe('打开自建目录', () => {
     stubFetch(() => json({ ok: false, code: 'not-owned', message: '不属于本插件' }, 403))
 
     await expect(revealCapability('tool:read')).rejects.toMatchObject({ code: 'not-owned' })
+  })
+})
+
+describe('MCP 连接管理', () => {
+  const list = { available: true, writable: true, servers: [] }
+
+  it('读取列表走 MCP 端点并带上自定义头', async () => {
+    const calls = stubFetch(() => json(list))
+
+    await expect(fetchMcpServers()).resolves.toEqual(list)
+    expect(calls[0]?.path).toBe(ROUTES.mcp)
+    expect((calls[0]?.init.headers as Record<string, string>)[REQUEST_HEADER]).toBe(REQUEST_HEADER_VALUE)
+  })
+
+  it('保存以 save 动作提交表单', async () => {
+    const calls = stubFetch(() => json({ ok: true, servers: [] }))
+    const form = { name: 'files', transport: 'stdio' as const, commandLine: 'npx -y pkg', env: '', url: '', headers: '' }
+
+    await saveMcpServer(form)
+
+    expect(calls[0]?.init.method).toBe('POST')
+    expect(calls[0]?.init.body).toBe(JSON.stringify({ op: 'save', form }))
+  })
+
+  it('启停、删除与导入各有动作体', async () => {
+    const calls = stubFetch(() => json({ ok: true, servers: [] }))
+
+    await toggleMcpServer('kino', false)
+    await deleteMcpServer('kino')
+    await importMcpServers('{"mcpServers":{}}')
+
+    expect(calls.map(call => JSON.parse(String(call.init.body)))).toEqual([
+      { op: 'toggle', name: 'kino', enabled: false },
+      { op: 'delete', name: 'kino' },
+      { op: 'import', json: '{"mcpServers":{}}' },
+    ])
+  })
+
+  it('不可用与写入失败的错误码原样交给调用方', async () => {
+    stubFetch(() => json({ ok: false, code: 'mcp-unavailable', message: 'no manager' }, 503))
+
+    await expect(fetchMcpServers()).rejects.toMatchObject({ code: 'mcp-unavailable' })
+  })
+
+  it('表单问题码随错误体带出', async () => {
+    stubFetch(() => json({ ok: false, code: 'mcp-invalid-entry', message: 'bad', issues: ['name-invalid'] }, 400))
+
+    await expect(saveMcpServer({ name: 'a.b', transport: 'stdio', commandLine: '', env: '', url: '', headers: '' }))
+      .rejects.toMatchObject({ code: 'mcp-invalid-entry', issues: ['name-invalid'] })
   })
 })

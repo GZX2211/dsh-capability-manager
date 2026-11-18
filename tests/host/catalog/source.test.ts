@@ -45,4 +45,23 @@ describe('能力来源判定', () => {
 
     expect(classifySource('__weird', context)).toBe('official')
   })
+
+  it('官方公开名（mcp__<server>__<tool>）算 MCP', () => {
+    const context = { owned: new Set<string>(), mcpServers: ['playwright'] }
+
+    expect(classifySource('mcp__playwright__browser_click', context)).toBe('mcp')
+  })
+
+  it('官方前缀仍要求服务器名完整匹配', () => {
+    const context = { owned: new Set<string>(), mcpServers: ['playwright'] }
+
+    expect(classifySource('mcp__playwright_extra__browser_click', context)).toBe('official')
+    expect(classifySource('mcp__other__browser_click', context)).toBe('official')
+  })
+
+  it('官方前缀下自建仍然优先', () => {
+    const context = { owned: new Set(['mcp__playwright__browser_click']), mcpServers: ['playwright'] }
+
+    expect(classifySource('mcp__playwright__browser_click', context)).toBe('custom')
+  })
 })

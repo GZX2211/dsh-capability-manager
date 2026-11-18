@@ -28,6 +28,10 @@ describe('路由契约', () => {
     expect(ROUTES.embeddingEnable).toBe(`${API_PREFIX}/embedding/enable`)
     expect(ROUTES.embeddingDisable).toBe(`${API_PREFIX}/embedding/disable`)
   })
+
+  it('MCP 连接管理有一个读写端点', () => {
+    expect(ROUTES.mcp).toBe(`${API_PREFIX}/mcp`)
+  })
 })
 
 describe('错误码契约', () => {
