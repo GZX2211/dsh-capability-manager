@@ -101,16 +101,25 @@ function normalizeEmbedding(value: unknown): EmbeddingConfig {
 
 /**
  * 保留键之一：这些键在普通对象上赋值会改动原型而不是属性。
- * 配置来自磁盘，必须显式拒绝。
+ * 配置来自磁盘，也必须挡住写请求，否则一次 POST 就能污染整个配置对象。
  */
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+/**
+ * 会话标识能否作为 `roleBindings` 的普通对象键。
+ *
+ * @param key - 会话标识。
+ * @returns 可以安全赋值时为 true。
+ */
+export function isSafeBindingKey(key: string): boolean {
+  return key.length > 0 && !UNSAFE_KEYS.has(key)
+}
 
 function normalizeRoleBindings(value: unknown): Record<string, SessionRoleName> {
   if (!isRecord(value)) return {}
   const bindings: Record<string, SessionRoleName> = {}
   for (const [sessionId, role] of Object.entries(value)) {
-    if (sessionId.length === 0) continue
-    if (UNSAFE_KEYS.has(sessionId)) continue
+    if (!isSafeBindingKey(sessionId)) continue
     if (role !== 'router' && role !== 'worker') continue
     bindings[sessionId] = role
   }

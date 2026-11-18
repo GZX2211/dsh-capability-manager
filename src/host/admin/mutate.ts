@@ -10,6 +10,7 @@
 import { parseId, toolId, type CapabilityId } from '../../shared/capability.ts'
 import type { CapabilityConfig, SessionRoleName } from '../../shared/config.ts'
 import { META_SEARCH_TOOL_ID } from '../../shared/config.ts'
+import { isSafeBindingKey } from '../config/sanitize.ts'
 
 export type ApplyPatchResult =
   | { ok: true; config: CapabilityConfig }
@@ -40,6 +41,8 @@ export function applyPatch(config: CapabilityConfig, patch: unknown): ApplyPatch
       return setBlacklist(config, record)
     case 'clear-blacklist':
       return clearBlacklist(config, record)
+    case 'set-role-binding':
+      return setRoleBinding(config, record)
     default:
       return badRequest(`未知的 op：${String(record.op)}`)
   }
@@ -100,6 +103,27 @@ function clearBlacklist(config: CapabilityConfig, record: Record<string, unknown
   if (role === undefined) return badRequest('role 必须是 router 或 worker')
 
   return { ok: true, config: { ...config, blacklist: { ...config.blacklist, [role]: [] } } }
+}
+
+/**
+ * 手动角色绑定：只影响角色判定，不碰池、常驻或黑名单。
+ *
+ * 角色判定优先问 `ctx.paRoles`，因此这里登记的是「PA 没有答案时的补足」。
+ * 允许给还不存在的会话写入绑定：会话可能稍后才创建，提前登记不影响任何现存会话。
+ */
+function setRoleBinding(config: CapabilityConfig, record: Record<string, unknown>): ApplyPatchResult {
+  if (typeof record.sessionId !== 'string' || !isSafeBindingKey(record.sessionId)) {
+    return badRequest(`sessionId 必须是非空的会话标识，收到 ${JSON.stringify(record.sessionId)}`)
+  }
+  const role = record.role
+  if (role !== null && role !== 'router' && role !== 'worker') {
+    return badRequest(`role 必须是 router、worker 或 null，收到 ${JSON.stringify(role)}`)
+  }
+
+  const bindings = { ...config.roleBindings }
+  if (role === null) delete bindings[record.sessionId]
+  else bindings[record.sessionId] = role
+  return { ok: true, config: { ...config, roleBindings: bindings } }
 }
 
 /** 收窄标识；非法标识一律当作未知能力，而不是静默忽略。 */

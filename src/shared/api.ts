@@ -120,6 +120,13 @@ export type ConfigPatchInput =
   | { op: 'set-resident'; id: CapabilityId; value: boolean }
   | { op: 'set-blacklist'; role: SessionRoleName; id: CapabilityId; value: boolean }
   | { op: 'clear-blacklist'; role: SessionRoleName }
+  /**
+   * 手动角色绑定：`role: null` 表示解除绑定。
+   *
+   * 绑定只补 `ctx.paRoles` 没有答案的会话（PA 判定优先）；`sessionId` 就是
+   * Agent 身份（宿主里 `Agent.id` 即 `SessionId`）。
+   */
+  | { op: 'set-role-binding'; sessionId: string; role: SessionRoleName | null }
 
 /**
  * 一次配置改动。

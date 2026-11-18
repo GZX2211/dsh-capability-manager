@@ -186,6 +186,100 @@ describe('角色黑名单', () => {
   })
 })
 
+describe('会话角色绑定', () => {
+  it('把会话绑定到某个角色', () => {
+    const result = applyPatch(DEFAULT_CONFIG, {
+      op: 'set-role-binding',
+      sessionId: 'session-1',
+      role: 'router',
+      revision: 0,
+    })
+
+    expect(result.ok && result.config.roleBindings).toEqual({ 'session-1': 'router' })
+  })
+
+  it('改变已有绑定', () => {
+    const result = applyPatch(config({ roleBindings: { 'session-1': 'router' } }), {
+      op: 'set-role-binding',
+      sessionId: 'session-1',
+      role: 'worker',
+      revision: 0,
+    })
+
+    expect(result.ok && result.config.roleBindings).toEqual({ 'session-1': 'worker' })
+  })
+
+  it('解除绑定：角色为 null 时删除该键', () => {
+    const result = applyPatch(config({ roleBindings: { 'session-1': 'router', 'session-2': 'worker' } }), {
+      op: 'set-role-binding',
+      sessionId: 'session-1',
+      role: null,
+      revision: 0,
+    })
+
+    expect(result.ok && result.config.roleBindings).toEqual({ 'session-2': 'worker' })
+  })
+
+  it('绑定只影响目标会话：其余绑定原样保留', () => {
+    const result = applyPatch(config({ roleBindings: { 'session-0': 'worker' } }), {
+      op: 'set-role-binding',
+      sessionId: 'session-1',
+      role: 'router',
+      revision: 0,
+    })
+
+    expect(result.ok && result.config.roleBindings).toEqual({ 'session-0': 'worker', 'session-1': 'router' })
+  })
+
+  it('拒绝非法角色', () => {
+    expect(
+      applyPatch(DEFAULT_CONFIG, { op: 'set-role-binding', sessionId: 'session-1', role: 'admin', revision: 0 }),
+    ).toMatchObject({ ok: false, code: 'bad-request' })
+  })
+
+  it('拒绝空会话标识', () => {
+    expect(
+      applyPatch(DEFAULT_CONFIG, { op: 'set-role-binding', sessionId: '', role: 'router', revision: 0 }),
+    ).toMatchObject({ ok: false, code: 'bad-request' })
+  })
+
+  it('拒绝会改写原型的会话标识', () => {
+    expect(
+      applyPatch(DEFAULT_CONFIG, { op: 'set-role-binding', sessionId: '__proto__', role: 'router', revision: 0 }),
+    ).toMatchObject({ ok: false, code: 'bad-request' })
+  })
+
+  it('拒绝非字符串的会话标识', () => {
+    expect(
+      applyPatch(DEFAULT_CONFIG, { op: 'set-role-binding', sessionId: 42, role: 'router', revision: 0 }),
+    ).toMatchObject({ ok: false, code: 'bad-request' })
+  })
+
+  it('拒绝缺失的角色：解除绑定必须显式给 null', () => {
+    expect(
+      applyPatch(DEFAULT_CONFIG, { op: 'set-role-binding', sessionId: 'session-1', revision: 0 }),
+    ).toMatchObject({ ok: false, code: 'bad-request' })
+  })
+
+  it('解除不存在的绑定是空操作', () => {
+    const result = applyPatch(config({ roleBindings: {} }), {
+      op: 'set-role-binding',
+      sessionId: 'session-1',
+      role: null,
+      revision: 0,
+    })
+
+    expect(result.ok && result.config.roleBindings).toEqual({})
+  })
+
+  it('绑定不修改传入的配置', () => {
+    const current = config({ roleBindings: {} })
+    applyPatch(current, { op: 'set-role-binding', sessionId: 'session-1', role: 'router', revision: 0 })
+
+    expect(current.roleBindings).toEqual({})
+  })
+})
+
 describe('纯度', () => {
   it('不修改传入的配置', () => {
     const current = config({ excluded: [] })
