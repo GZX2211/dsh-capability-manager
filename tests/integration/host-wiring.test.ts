@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import * as hostPlugin from '../../src/host/index.ts'
+import type { EmbeddingOverrides } from '../../src/host/index.ts'
 import type { HostContext } from '../../src/host/context.ts'
 import { CATALOG_SOURCE_KIND } from '../../src/host/skill-consumer/catalog.ts'
 import { DEFAULT_CONFIG, type CapabilityConfig } from '../../src/shared/config.ts'
@@ -54,6 +55,8 @@ function createHost(options: {
   mcpServers?: readonly string[]
   /** 模拟 Personal Agent 的角色服务；缺省表示没有 `ctx.paRoles`。 */
   roles?: (sessionId: string) => 'router' | 'worker' | undefined
+  /** 向量基础设施注入：测试用假嵌入器代替原生运行时与 24MB 模型。 */
+  embedding?: EmbeddingOverrides
 } = {}) {
   const stateDir = mkdtempSync(join(tmpdir(), 'cm-wiring-'))
   tempDirs.push(stateDir)
@@ -209,7 +212,7 @@ function createHost(options: {
     skills: fakeSkills,
   } as unknown as HostContext
 
-  hostPlugin.apply(ctx, { stateDir })
+  hostPlugin.apply(ctx, { stateDir, embedding: options.embedding })
 
   const emit = async (name: string, ...args: unknown[]): Promise<unknown> => {
     const list = listeners.get(name)
@@ -219,26 +222,48 @@ function createHost(options: {
     return listener?.(...args)
   }
 
+  /** 发一次 HTTP 请求；返回状态码与解析后的响应体。 */
+  const request = async (method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; body: unknown }> => {
+    const server = webServers[0] as { handler: (req: unknown, res: unknown) => Promise<void> }
+    const chunks: string[] = []
+    const statuses: number[] = []
+    const response = {
+      setHeader: () => {},
+      writeHead: (status: number) => {
+        statuses.push(status)
+      },
+      end: (chunk: unknown) => {
+        chunks.push(String(chunk))
+      },
+    }
+    const payload = body === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(body))
+    const incoming = Object.assign(
+      (async function* empty() {
+        yield payload
+      })() as never,
+      {
+        url: path,
+        method,
+        headers: { 'x-capability-manager-request': '1' },
+      },
+    )
+    await server.handler(incoming, response)
+    return {
+      status: statuses[0] ?? 0,
+      body: chunks.length === 0 ? undefined : JSON.parse(chunks.join('')),
+    }
+  }
+
   const snapshot = async (): Promise<{
     capabilities: { id: string; kind: string; name: string; source?: string; owned?: boolean }[]
     rolesAvailable: boolean
     sessions?: { id: string; role?: string; roleSource: string }[]
+    embedding: { enabled: boolean; status: string; message?: string }
+    warnings: { code: string }[]
     diagnostics?: { agents: { presentCount: number; allowCount: number }[] }
   }> => {
-    const server = webServers[0] as { handler: (req: unknown, res: unknown) => Promise<void> }
-    const chunks: string[] = []
-    const response = {
-      setHeader: () => {},
-      writeHead: () => {},
-      end: (chunk: unknown) => { chunks.push(String(chunk)) },
-    }
-    const request = Object.assign((async function* empty() {})() as never, {
-      url: '/capability-manager/api/snapshot',
-      method: 'GET',
-      headers: { 'x-capability-manager-request': '1' },
-    })
-    await server.handler(request, response)
-    return JSON.parse(chunks.join('')) as never
+    const result = await request('GET', '/capability-manager/api/snapshot')
+    return result.body as never
   }
 
   return {
@@ -250,6 +275,7 @@ function createHost(options: {
     sections,
     webServers,
     snapshot,
+    request,
     stateDir,
     providers,
     registeredSkills,
@@ -271,6 +297,11 @@ function createHost(options: {
         signal: new AbortController().signal,
         modelSelection: { provider: 'p', model: 'm' },
       }, next)
+    },
+    /** 索引 section 在当前配置下的渲染结果。 */
+    indexText(): string {
+      const section = sections[0] as { text: (context: { agent?: unknown }) => string }
+      return section.text({ agent })
     },
   }
 }
@@ -619,6 +650,123 @@ describe('角色黑名单', () => {
     const snapshot = await host.snapshot()
 
     expect(snapshot.sessions).toEqual([{ id: 'session-1', roleSource: 'unknown' }])
+  })
+})
+
+/** 假向量基础设施：按「文本里是否含关键词」给两维向量，足以观察召回与模式切换。 */
+function fakeEmbedding(keyword: string, options: { fail?: boolean } = {}): EmbeddingOverrides {
+  return {
+    ensureModel: async () =>
+      options.fail === true ? { ok: false, message: 'no network' } : { ok: true },
+    loadEmbedder: async () => ({
+      async embed(texts: readonly string[]) {
+        return texts.map(text =>
+          text.toLowerCase().includes(keyword.toLowerCase())
+            ? Float32Array.from([1, 0])
+            : Float32Array.from([0, 1]),
+        )
+      },
+      async dispose() {},
+    }),
+    modelPresent: () => true,
+  }
+}
+
+const ENABLE_EMBEDDING = '/capability-manager/api/embedding/enable'
+const DISABLE_EMBEDDING = '/capability-manager/api/embedding/disable'
+
+describe('向量检索', () => {
+  it('开启端点返回 200，快照变为 ready 并写回配置', async () => {
+    const host = createHost({ embedding: fakeEmbedding('alpha') })
+
+    const response = await host.request('POST', ENABLE_EMBEDDING)
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ok: true })
+    const snapshot = await host.snapshot()
+    expect(snapshot.embedding).toMatchObject({ enabled: true, status: 'ready' })
+  })
+
+  it('开启后进入模式 B：目录不注入、索引为空', async () => {
+    const host = createHost({ embedding: fakeEmbedding('alpha') })
+    await host.createAgent()
+    await host.request('POST', ENABLE_EMBEDDING)
+
+    const decision = await host.preStep() as { messages: { source?: { kind?: string } }[] }
+
+    expect(decision.messages.filter(message => message.source?.kind === CATALOG_SOURCE_KIND)).toHaveLength(0)
+    expect(host.indexText()).toBe('')
+  })
+
+  it('模式 B 下 keywords 召回 Skill 索引条目', async () => {
+    const host = createHost({
+      skills: [{ name: 'alpha-skill', description: 'Alpha 的说明' }],
+      embedding: fakeEmbedding('alpha'),
+    })
+    await host.createAgent()
+    await host.request('POST', ENABLE_EMBEDDING)
+    const metaSearch = host.globalTools.find(tool => tool.name === 'meta_search')
+    if (metaSearch === undefined) throw new Error('meta_search not registered')
+
+    const value = await metaSearch.execute(
+      { keywords: 'alpha' },
+      { agent: host.agent as never, signal: new AbortController().signal } as never,
+    ) as { skills: { name: string }[]; notes: string[] }
+
+    expect(value.skills.map(skill => skill.name)).toEqual(['alpha-skill'])
+  })
+
+  it('模式 B 下 keywords 也能召回工具', async () => {
+    const host = createHost({ embedding: fakeEmbedding('read') })
+    await host.createAgent()
+    await host.request('POST', ENABLE_EMBEDDING)
+    const metaSearch = host.globalTools.find(tool => tool.name === 'meta_search')
+    if (metaSearch === undefined) throw new Error('meta_search not registered')
+
+    const value = await metaSearch.execute(
+      { keywords: 'read file' },
+      { agent: host.agent as never, signal: new AbortController().signal } as never,
+    ) as { tools: { name: string }[] }
+
+    expect(value.tools.map(tool => tool.name)).toEqual(['read'])
+  })
+
+  it('模式 A 下 keywords 被忽略并给出说明', async () => {
+    const host = createHost()
+    await host.createAgent()
+    const metaSearch = host.globalTools.find(tool => tool.name === 'meta_search')
+    if (metaSearch === undefined) throw new Error('meta_search not registered')
+
+    const value = await metaSearch.execute(
+      { keywords: 'alpha' },
+      { agent: host.agent as never, signal: new AbortController().signal } as never,
+    ) as { tools: unknown[]; skills: unknown[]; notes: string[] }
+
+    expect(value.tools).toEqual([])
+    expect(value.skills).toEqual([])
+    expect(value.notes.some(note => note.includes('未开启'))).toBe(true)
+  })
+
+  it('关闭端点恢复模式 A：索引重新注入', async () => {
+    const host = createHost({ embedding: fakeEmbedding('alpha') })
+    await host.createAgent()
+    await host.request('POST', ENABLE_EMBEDDING)
+
+    const response = await host.request('POST', DISABLE_EMBEDDING)
+
+    expect(response.status).toBe(200)
+    expect((await host.snapshot()).embedding).toMatchObject({ enabled: false, status: 'idle' })
+    expect(host.indexText()).toContain('<available_tools>')
+  })
+
+  it('下载失败返回 502，并保持关闭', async () => {
+    const host = createHost({ embedding: fakeEmbedding('alpha', { fail: true }) })
+
+    const response = await host.request('POST', ENABLE_EMBEDDING)
+
+    expect(response.status).toBe(502)
+    expect(response.body).toMatchObject({ ok: false, code: 'embedding-download-failed' })
+    expect((await host.snapshot()).embedding).toMatchObject({ enabled: false, status: 'failed' })
   })
 })
 

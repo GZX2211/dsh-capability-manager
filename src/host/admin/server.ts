@@ -33,6 +33,10 @@ export interface AdminTarget {
   createSkill: (body: unknown) => Promise<ConfigOutcome> | ConfigOutcome
   /** 在系统文件管理器里打开一个自建能力的目录。 */
   reveal: (body: unknown) => Promise<ConfigOutcome> | ConfigOutcome
+  /** 开启向量检索：等模型下载、校验与加载完成后返回。 */
+  enableEmbedding: () => Promise<ConfigOutcome> | ConfigOutcome
+  /** 关闭向量检索。 */
+  disableEmbedding: () => Promise<ConfigOutcome> | ConfigOutcome
 }
 
 /**
@@ -95,6 +99,17 @@ async function dispatch(target: AdminTarget, request: IncomingMessage, response:
   if (path === ROUTES.reveal) {
     if (method !== 'POST') return sendMethodNotAllowed(response, 'POST')
     return postJson(request, response, target.reveal)
+  }
+
+  // 两个开关端点不需要请求体：语义是「执行一次动作」，不是「提交一份配置」。
+  if (path === ROUTES.embeddingEnable) {
+    if (method !== 'POST') return sendMethodNotAllowed(response, 'POST')
+    return postJson(request, response, () => target.enableEmbedding())
+  }
+
+  if (path === ROUTES.embeddingDisable) {
+    if (method !== 'POST') return sendMethodNotAllowed(response, 'POST')
+    return postJson(request, response, () => target.disableEmbedding())
   }
 
   return sendJson(response, 404, failure(ERROR_CODES.notFound, `no route for ${path}`))

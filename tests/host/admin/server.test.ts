@@ -28,6 +28,8 @@ function makeTarget(overrides: Partial<AdminTarget> = {}): AdminTarget {
     writeConfig: async () => ({ status: 200, body: { ok: true, revision: 1 } }),
     createSkill: async () => ({ status: 200, body: { ok: true, revision: 1 } }),
     reveal: async () => ({ status: 200, body: { ok: true } }),
+    enableEmbedding: async () => ({ status: 200, body: { ok: true } }),
+    disableEmbedding: async () => ({ status: 200, body: { ok: true } }),
     ...overrides,
   }
 }
@@ -320,6 +322,68 @@ describe('打开目录端点', () => {
     expect(reveal).not.toHaveBeenCalled()
   })
 })
+describe('向量检索开关端点', () => {
+  it('开启端点把结果原样作为响应', async () => {
+    const enableEmbedding = vi.fn(async () => ({ status: 200, body: { ok: true } }))
+
+    const { captured, json } = await call(makeTarget({ enableEmbedding }), {
+      method: 'POST',
+      path: `${API_PREFIX}/embedding/enable`,
+      headers: sameOrigin,
+    })
+
+    expect(captured.status).toBe(200)
+    expect(json).toEqual({ ok: true })
+    expect(enableEmbedding).toHaveBeenCalledOnce()
+  })
+
+  it('开启失败时按动作给的状态码与错误码返回', async () => {
+    const enableEmbedding = vi.fn(async () => ({
+      status: 502,
+      body: { ok: false, code: 'embedding-download-failed', message: 'no network' },
+    }))
+
+    const { captured, json } = await call(makeTarget({ enableEmbedding }), {
+      method: 'POST',
+      path: `${API_PREFIX}/embedding/enable`,
+      headers: sameOrigin,
+    })
+
+    expect(captured.status).toBe(502)
+    expect(json).toMatchObject({ ok: false, code: 'embedding-download-failed' })
+  })
+
+  it('关闭端点只接受 POST', async () => {
+    const disableEmbedding = vi.fn(async () => ({ status: 200, body: { ok: true } }))
+
+    const ok = await call(makeTarget({ disableEmbedding }), {
+      method: 'POST',
+      path: `${API_PREFIX}/embedding/disable`,
+      headers: sameOrigin,
+    })
+    const wrongMethod = await call(makeTarget({ disableEmbedding }), {
+      path: `${API_PREFIX}/embedding/disable`,
+      headers: sameOrigin,
+    })
+
+    expect(ok.captured.status).toBe(200)
+    expect(wrongMethod.captured.status).toBe(405)
+    expect(disableEmbedding).toHaveBeenCalledOnce()
+  })
+
+  it('开关端点同样受同源守卫保护', async () => {
+    const enableEmbedding = vi.fn()
+
+    const { captured } = await call(makeTarget({ enableEmbedding }), {
+      method: 'POST',
+      path: `${API_PREFIX}/embedding/enable`,
+    })
+
+    expect(captured.status).toBe(403)
+    expect(enableEmbedding).not.toHaveBeenCalled()
+  })
+})
+
 describe('未知路径', () => {
   it('返回稳定的 not-found 错误码', async () => {
     const { captured, json } = await call(makeTarget(), {

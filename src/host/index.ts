@@ -14,8 +14,9 @@ import {
   type ErrorResponse,
   type SessionRoleSnapshot,
 } from '../shared/api.ts'
-import { skillId, type CapabilityEntry } from '../shared/capability.ts'
+import { parseId, skillId, type CapabilityEntry } from '../shared/capability.ts'
 import type { ToolSource } from './catalog/collect.ts'
+import { summarize } from './catalog/collect.ts'
 import { toolId } from '../shared/capability.ts'
 import { SKILL_TOOL_ID, type CapabilityConfig, type SessionRoleName } from '../shared/config.ts'
 import { applyPatch } from './admin/mutate.ts'
@@ -33,7 +34,10 @@ import { EnforcementRegistry, type AgentScope } from './enforcement/registry.ts'
 import { RecalledStore, type SessionLike } from './enforcement/recalled.ts'
 import { renderIndex, selectToolIndex, shouldInjectIndex } from './prompt/index-section.ts'
 import { createRoleResolver, type RoleResolver } from './roles/resolve.ts'
-import { skillPayload } from './search/payload.ts'
+import { EmbeddingService, type EmbeddingCandidate, type EmbeddingServiceOptions } from './search/embedding/index.ts'
+import { modelDirOf } from './search/embedding/model.ts'
+import type { KeywordHits } from './search/index.ts'
+import { skillPayload, type SkillPayloadSource, type ToolPayloadSource } from './search/payload.ts'
 import { toolNamesOf, toolPayloadsOf } from './search/seen.ts'
 import { SelfmadeSkills } from './selfmade/skills.ts'
 import { SelfmadeTools } from './selfmade/tools.ts'
@@ -67,9 +71,18 @@ export const inject = ['tools', 'systemPrompt', 'webServer', 'agents', 'skills']
  */
 const INDEX_SECTION_ORDER = 10150
 
+/** 向量检索的可替换基础设施；生产不传，测试与无原生运行时环境用。 */
+export interface EmbeddingOverrides {
+  ensureModel?: EmbeddingServiceOptions['ensureModel']
+  loadEmbedder?: EmbeddingServiceOptions['loadEmbedder']
+  modelPresent?: () => boolean
+}
+
 export interface Config {
   /** 状态目录覆盖；缺省 `<DSH_HOME>/state/capability-manager`。 */
   stateDir?: string
+  /** 向量检索的注入点。 */
+  embedding?: EmbeddingOverrides
 }
 
 export function apply(ctx: HostContext, config?: Config): void {
@@ -83,6 +96,29 @@ export function apply(ctx: HostContext, config?: Config): void {
   const roles = createRoleResolver({
     lookup: serviceName => ctx.get(serviceName),
     bindings: () => store.read().roleBindings,
+  })
+  const embedding = new EmbeddingService({
+    modelDir: modelDirOf(stateDir),
+    config: () => store.read(),
+    saveEmbedding: embeddingConfig => {
+      // 复用配置存储的写路径：一次写入、一次 revision 递增、一次变更通知。
+      const current = store.read()
+      const written = store.write(
+        { ...current, embedding: { ...current.embedding, ...embeddingConfig } },
+        store.revision,
+      )
+      if (!written.ok) {
+        log(
+          written.code === 'write-failed'
+            ? `cannot persist the embedding switch: ${written.message}`
+            : `cannot persist the embedding switch: revision conflict at ${String(written.revision)}`,
+        )
+      }
+    },
+    ensureModel: config?.embedding?.ensureModel,
+    loadEmbedder: config?.embedding?.loadEmbedder,
+    modelPresent: config?.embedding?.modelPresent,
+    log,
   })
   const enforcement = new EnforcementRegistry({
     config: () => store.read(),
@@ -128,29 +164,41 @@ export function apply(ctx: HostContext, config?: Config): void {
 
   // ---- meta_search ----
   const metaSearch = createMetaSearchTool({
-    sources: async (agent, signal) => {
+    sources: async (agent, signal, request) => {
       const sessionId = agentIdOf(agent)
       const context = skillContextOf(agent)
       const skillUsable = isSkillToolUsable(context)
       // 注册表抖动不应该连累工具召回：Skill 候选降级为空，工具照常返回。
       const skills = skillUsable ? await loadEligibleSkills(skillQuery, context, agent, signal, log) : []
       const entries = catalogEntries(skills)
+      // 名称 → 目录条目；召回与语义通道共用同一份，避免两者对「有哪些 Skill」理解不一致。
+      const skillEntries = new Map(entries.map(entry => [entry.name, entry]))
       // 模式 A 且目录已注入时，整份 Skill 列表都已出现在上下文中，Skill 召回必然为空。
       const catalogResident = skillUsable && !context.config.embedding.enabled
+      const tools = buildToolCandidates({
+        schemas: enforcement.schemasOf(),
+        present: enforcement.presentOf(sessionId),
+        config: context.config,
+        role: context.role,
+      })
+      // 语义命中按 request.keywords 现算：候选依赖当前可见集，无法预先算好。
+      const keywordHits = await keywordHitsOf({
+        embedding,
+        config: context.config,
+        keywords: request.keywords,
+        tools,
+        skills: skillEntries,
+      })
       return {
-        tools: buildToolCandidates({
-          schemas: enforcement.schemasOf(),
-          present: enforcement.presentOf(sessionId),
-          config: context.config,
-          role: context.role,
-        }),
-        skills: new Map(entries.map(entry => [entry.name, entry])),
+        tools,
+        skills: skillEntries,
         seenTools: toolPayloadsOf(visibleToolsOf(agent, log)),
         seenSkills: catalogResident
           ? new Set(entries.map(skillPayload))
           : recalled.skillPayloadsOf(sessionId),
         embeddingEnabled: context.config.embedding.enabled,
         skillCatalogResident: catalogResident,
+        keywordHits,
       }
     },
     record: (sessionId, outcome) => {
@@ -368,8 +416,7 @@ export function apply(ctx: HostContext, config?: Config): void {
                 config: current,
                 rolesAvailable: roles.available,
                 sessions: sessionRolesOf(roles, liveAgents),
-                // M2 只有模式 A：向量检索恒为关闭状态。
-                embedding: { enabled: current.embedding.enabled, status: 'idle' },
+                embedding: embedding.status(),
                 diagnostics: {
                   knownToolCount: enforcement.universe.size,
                   schemaCount: enforcement.schemasOf().size,
@@ -389,6 +436,20 @@ export function apply(ctx: HostContext, config?: Config): void {
               ownsTool: toolName => selfmadeTools.names().has(toolName),
               directoryOfSkill: skillName => selfmadeSkills.directoryOf(skillName),
             }, body),
+            enableEmbedding: async () => {
+              const result = await embedding.enable()
+              if (result.ok) return { status: 200, body: { ok: true } }
+              // 下载失败是上游（模型源）问题，运行时不可用是本机能力问题：
+              // 分成两个状态码，客户端与日志都能据此分流。
+              return {
+                status: result.code === 'embedding-download-failed' ? 502 : 503,
+                body: { ok: false, code: result.code, message: result.message },
+              }
+            },
+            disableEmbedding: async () => {
+              await embedding.disable()
+              return { status: 200, body: { ok: true } }
+            },
           }),
         }),
       'capability-manager: http',
@@ -402,6 +463,16 @@ export function apply(ctx: HostContext, config?: Config): void {
       enforcement.dispose()
     },
     'capability-manager: enforcement',
+  )
+
+  // 向量检索：启动自愈（模型缺失/加载失败时保持关闭）与卸载释放。
+  guard(log, 'start the embedding service', () => embedding.start())
+  ctx.effect(
+    () => () => {
+      // cleanup 不能等待：释放失败时进程正在退出，缓存与会话由宿主回收。
+      void embedding.dispose()
+    },
+    'capability-manager: embedding',
   )
 
   // 插件热启用或重载时，已存在的 agent 不会再发 `agent/created`，上面那个监听收不到它们。
@@ -519,6 +590,50 @@ function visibleToolsOf(agent: unknown, log: (message: string) => void): readonl
 /** 索引只放名称与摘要，与列表共用同一份摘要。 */
 function summariesOf(capabilities: readonly CapabilityEntry[]): Map<string, string> {
   return new Map(capabilities.filter(entry => entry.kind === 'tool').map(entry => [entry.name, entry.summary]))
+}
+
+/** 语义通道的输入：服务、配置、关键词与两侧候选。 */
+interface KeywordHitsInput {
+  embedding: EmbeddingService
+  config: CapabilityConfig
+  keywords: string | undefined
+  tools: ReadonlyMap<string, ToolPayloadSource>
+  skills: ReadonlyMap<string, SkillPayloadSource>
+}
+
+/**
+ * 计算语义通道的名称命中。
+ *
+ * 只在模式 B 且真的给了 keywords 时计算：模式 A 下 keywords 由检索编排给出
+ * 「未开启」的说明，这里返回 undefined 即可。
+ *
+ * @param input - 服务、配置、关键词与两侧候选。
+ * @returns 工具与 Skill 的名称命中；不可用时为 `undefined`。
+ */
+async function keywordHitsOf(input: KeywordHitsInput): Promise<KeywordHits | undefined> {
+  const keywords = input.keywords?.trim() ?? ''
+  if (keywords === '' || !input.config.embedding.enabled) return undefined
+
+  const candidates: EmbeddingCandidate[] = []
+  for (const [name, schema] of input.tools) {
+    candidates.push({ id: toolId(name), summary: summarize(schema.description) })
+  }
+  for (const [name, entry] of input.skills) {
+    candidates.push({ id: skillId(name), summary: entry.description })
+  }
+
+  const hits = await input.embedding.search(keywords, candidates)
+  if (hits === undefined) return undefined
+
+  const tools: string[] = []
+  const skills: string[] = []
+  for (const hit of hits) {
+    const parsed = parseId(hit.id)
+    if (parsed === undefined) continue
+    if (parsed.kind === 'tool') tools.push(parsed.name)
+    else skills.push(parsed.name)
+  }
+  return { tools, skills }
 }
 
 /**

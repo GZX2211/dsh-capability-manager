@@ -23,6 +23,11 @@ describe('路由契约', () => {
     expect(ROUTES.createSkill).toBe(`${API_PREFIX}/skills`)
     expect(ROUTES.reveal).toBe(`${API_PREFIX}/reveal`)
   })
+
+  it('向量检索的开关各有一个端点', () => {
+    expect(ROUTES.embeddingEnable).toBe(`${API_PREFIX}/embedding/enable`)
+    expect(ROUTES.embeddingDisable).toBe(`${API_PREFIX}/embedding/disable`)
+  })
 })
 
 describe('错误码契约', () => {

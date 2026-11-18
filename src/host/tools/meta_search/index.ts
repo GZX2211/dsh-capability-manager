@@ -61,8 +61,13 @@ export interface MetaSearchRecord {
 }
 
 export interface MetaSearchDependencies {
-  /** 该 agent 此刻可召回的工具与 Skill，以及两类已见载荷与模式开关。 */
-  sources: (agent: unknown, signal: AbortSignal) => Promise<MetaSearchSources>
+  /**
+   * 该 agent 此刻可召回的工具与 Skill，以及两类已见载荷、模式开关。
+   *
+   * 带上已解析的请求：语义通道要按 `keywords` 现算命中，而候选与命中都依赖
+   * 当前 agent 的可见集，无法在工具定义外预先算好。
+   */
+  sources: (agent: unknown, signal: AbortSignal, request: MetaSearchRequest) => Promise<MetaSearchSources>
   /** 记录本次召回并重建可见集；只在真的返回了能力时调用。 */
   record: (sessionId: string, outcome: MetaSearchRecord) => void
 }
@@ -156,7 +161,8 @@ export function createMetaSearchTool(deps: MetaSearchDependencies): ToolDefiniti
         throw new Error('meta_search 只能在会话内调用：当前没有发起调用的 agent')
       }
       const session = agent.session
-      const outcome = runMetaSearch(await deps.sources(agent, context.signal), parseMetaSearchArgs(rawArgs))
+      const request = parseMetaSearchArgs(rawArgs)
+      const outcome = runMetaSearch(await deps.sources(agent, context.signal, request), request)
       if (outcome.toolNames.length > 0 || outcome.skillPayloads.length > 0) {
         deps.record(session.id, {
           toolNames: outcome.toolNames,

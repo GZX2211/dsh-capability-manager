@@ -27,6 +27,14 @@ export const ROUTES = {
   createSkill: `${API_PREFIX}/skills`,
   /** 在系统文件管理器里打开某个自建能力的目录。 */
   reveal: `${API_PREFIX}/reveal`,
+  /**
+   * 开启向量检索：同步等待模型下载、校验与加载完成。
+   *
+   * 首次开启要下载 24MB 模型，因此这个请求可能持续几十秒；界面只需在请求期间转圈。
+   */
+  embeddingEnable: `${API_PREFIX}/embedding/enable`,
+  /** 关闭向量检索：释放会话并写回配置。 */
+  embeddingDisable: `${API_PREFIX}/embedding/disable`,
 } as const
 
 /** 稳定错误码：客户端按码分支，不吞错。 */
