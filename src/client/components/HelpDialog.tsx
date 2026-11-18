@@ -12,11 +12,13 @@ export interface HelpDialogProps {
   open: boolean
   /** 向量检索是否开启；决定说明里讲模式 A 还是模式 B。 */
   embeddingEnabled: boolean
+  /** 检测到 `ctx.paRoles` 时才解释角色黑名单：没有服务时那两个分区根本不存在。 */
+  rolesAvailable: boolean
   onClose: () => void
   t: Translate
 }
 
-export function HelpDialog({ open, embeddingEnabled, onClose, t }: HelpDialogProps) {
+export function HelpDialog({ open, embeddingEnabled, rolesAvailable, onClose, t }: HelpDialogProps) {
   return (
     <Modal
       open={open}
@@ -46,6 +48,20 @@ export function HelpDialog({ open, embeddingEnabled, onClose, t }: HelpDialogPro
           <span className="cm-help-term">{t('helpRecallTitle')}</span>
           <span>{t('helpRecallBody')}</span>
         </div>
+
+        {rolesAvailable ? (
+          <>
+            <div className="cm-help-section">
+              <span className="cm-help-term">{t('helpRolesTitle')}</span>
+              <span>{t('helpRolesBody')}</span>
+            </div>
+
+            <div className="cm-help-section">
+              <span className="cm-help-term">{t('helpBindingTitle')}</span>
+              <span>{t('helpBindingBody')}</span>
+            </div>
+          </>
+        ) : null}
 
         <p className="cm-help-mode">{t(embeddingEnabled ? 'helpModeB' : 'helpModeA')}</p>
       </div>

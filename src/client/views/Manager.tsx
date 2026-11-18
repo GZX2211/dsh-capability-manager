@@ -20,6 +20,7 @@ import { SourceFilter } from '../components/SourceFilter.tsx'
 import { TransferPane } from '../components/TransferPane.tsx'
 import { WarningBar } from '../components/WarningBar.tsx'
 import { CreateCapabilityMenu } from '../components/CreateCapabilityMenu.tsx'
+import { Settings } from './Settings.tsx'
 import type { Translate } from '../i18n.ts'
 
 type TabValue = 'tools' | 'skills' | 'settings'
@@ -201,11 +202,25 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
         />
       </div>
 
+      {/* 提示条放在 tab 内容之上：设置页的写入失败与黑名单风险同样要出现在视野里。 */}
+      {snapshot.snapshot !== undefined ? <WarningBar warnings={snapshot.snapshot.warnings} t={t} /> : null}
+      {createFailed ? <p className="cm-notice">{t('createUnavailable')}</p> : null}
+      {snapshot.notice !== undefined ? <p className="cm-notice">{snapshot.notice}</p> : null}
+      {snapshot.writeError !== undefined ? <p className="cm-notice">{snapshot.writeError}</p> : null}
+
       {tab === 'settings' ? (
         <div className="cm-content">
-          <div className="cm-body">
-            <p className="cm-placeholder">{t('settingsPlaceholder')}</p>
-          </div>
+          {snapshot.snapshot === undefined ? (
+            <SnapshotState error={snapshot.error} onRetry={snapshot.refresh} t={t} />
+          ) : (
+            <Settings
+              snapshot={snapshot.snapshot}
+              capabilities={capabilities}
+              saving={snapshot.saving}
+              onMutate={snapshot.mutate}
+              t={t}
+            />
+          )}
         </div>
       ) : (
         <>
@@ -221,28 +236,13 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
             />
           </div>
 
-          {snapshot.snapshot !== undefined ? <WarningBar warnings={snapshot.snapshot.warnings} t={t} /> : null}
-          {createFailed ? <p className="cm-notice">{t('createUnavailable')}</p> : null}
-          {snapshot.notice !== undefined ? <p className="cm-notice">{snapshot.notice}</p> : null}
-          {snapshot.writeError !== undefined ? <p className="cm-notice">{snapshot.writeError}</p> : null}
-
           <div
             className={split.dragging ? 'cm-content cm-content--dragging' : 'cm-content'}
             id={`cm-panel-${tab}`}
             role="tabpanel"
           >
-            {snapshot.error !== undefined && snapshot.snapshot === undefined ? (
-              <div className="cm-state">
-                <span>{t('loadFailed')}</span>
-                <Button variant="outline" size="sm" onClick={snapshot.refresh}>
-                  {t('retry')}
-                </Button>
-              </div>
-            ) : snapshot.snapshot === undefined ? (
-              <div className="cm-state">
-                <IconLoadingOutlineRegular />
-                <span>{t('loading')}</span>
-              </div>
+            {snapshot.snapshot === undefined ? (
+              <SnapshotState error={snapshot.error} onRetry={snapshot.refresh} t={t} />
             ) : config === undefined ? null : (
               <div
                 className="cm-transfer"
@@ -296,12 +296,38 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
         </>
       )}
 
+
       <HelpDialog
         open={helpOpen}
         embeddingEnabled={snapshot.snapshot?.embedding.enabled ?? false}
+        rolesAvailable={snapshot.snapshot?.rolesAvailable ?? false}
         onClose={() => setHelpOpen(false)}
         t={t}
       />
+    </div>
+  )
+}
+
+/**
+ * 快照尚未到位时的占位：读取失败给重试，读取中给加载态。
+ *
+ * 两个 tab 共用同一段判断，避免一处改了「失败」与「加载中」的分界、另一处没改。
+ */
+function SnapshotState({ error, onRetry, t }: { error: string | undefined; onRetry: () => void; t: Translate }) {
+  if (error !== undefined) {
+    return (
+      <div className="cm-state">
+        <span>{t('loadFailed')}</span>
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          {t('retry')}
+        </Button>
+      </div>
+    )
+  }
+  return (
+    <div className="cm-state">
+      <IconLoadingOutlineRegular />
+      <span>{t('loading')}</span>
     </div>
   )
 }
