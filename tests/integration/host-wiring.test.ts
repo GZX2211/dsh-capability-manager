@@ -52,9 +52,15 @@ function createHost(options: {
   extraTools?: readonly string[]
   /** 已连接的 MCP 服务器名。 */
   mcpServers?: readonly string[]
+  /** 模拟 Personal Agent 的角色服务；缺省表示没有 `ctx.paRoles`。 */
+  roles?: (sessionId: string) => 'router' | 'worker' | undefined
 } = {}) {
   const stateDir = mkdtempSync(join(tmpdir(), 'cm-wiring-'))
   tempDirs.push(stateDir)
+  // 配置是磁盘事实：宿主只从状态目录读，不看调用方的入参。
+  if (options.config !== undefined) {
+    writeFileSync(join(stateDir, 'config.json'), JSON.stringify(options.config), 'utf8')
+  }
 
   const listeners = new Map<string, ((...args: unknown[]) => unknown)[]>()
   const onOptions: (unknown | undefined)[] = []
@@ -154,6 +160,9 @@ function createHost(options: {
       if (name === 'mcpManager' && options.mcpServers !== undefined) {
         return { list: () => options.mcpServers?.map(server => ({ name: server })) }
       }
+      if (name === 'paRoles' && options.roles !== undefined) {
+        return { roleOf: (sessionId: string) => options.roles?.(sessionId) }
+      }
       return undefined
     },
     effect: (callback: () => () => void) => {
@@ -212,6 +221,8 @@ function createHost(options: {
 
   const snapshot = async (): Promise<{
     capabilities: { id: string; kind: string; name: string; source?: string; owned?: boolean }[]
+    rolesAvailable: boolean
+    sessions?: { id: string; role?: string; roleSource: string }[]
     diagnostics?: { agents: { presentCount: number; allowCount: number }[] }
   }> => {
     const server = webServers[0] as { handler: (req: unknown, res: unknown) => Promise<void> }
@@ -244,6 +255,10 @@ function createHost(options: {
     registeredSkills,
     onOptions,
     config: options.config ?? DEFAULT_CONFIG,
+    /** 该 agent 此刻可见的工具名：restriction 生效后的真实结果。 */
+    visible(): string[] {
+      return agent.ctx.tools.definitions(agent).map(source => source.name).sort()
+    },
     createAgent() {
       return emit('agent/created', { agent })
     },
@@ -453,6 +468,157 @@ describe('apply 装配', () => {
     )
 
     expect(value).toEqual({ exitCode: 0, stdout: 'pong', stderr: '' })
+  })
+})
+
+/** 让 `read` 直接可用：黑名单要能被观察到，能力本身必须先有资格出现。 */
+const READ_RESIDENT: CapabilityConfig = {
+  ...DEFAULT_CONFIG,
+  resident: ['tool:meta_search', 'tool:skill', 'tool:read'],
+}
+
+/** 同一份配置：Router 禁用 `read`，Worker 不受影响。 */
+const ROUTER_DENIES_READ: CapabilityConfig = {
+  ...READ_RESIDENT,
+  blacklist: { router: ['tool:read'], worker: [] },
+}
+
+/**
+ * 召回场景的同一份配置：`read` 非常驻。
+ *
+ * 常驻工具本来就在上下文里，会被载荷级去重剔除；要观察「黑名单是否影响召回」，
+ * 目标能力必须先处于非常驻状态。
+ */
+const ROUTER_RECALL_DENIES_READ: CapabilityConfig = {
+  ...DEFAULT_CONFIG,
+  blacklist: { router: ['tool:read'], worker: [] },
+}
+
+describe('角色黑名单', () => {
+  it('Router 黑名单里的工具对 Router 会话不可见', async () => {
+    const host = createHost({ config: ROUTER_DENIES_READ, roles: () => 'router' })
+    await host.createAgent()
+
+    expect(host.visible()).not.toContain('read')
+  })
+
+  it('同一份配置对 Worker 会话无影响', async () => {
+    const host = createHost({ config: ROUTER_DENIES_READ, roles: () => 'worker' })
+    await host.createAgent()
+
+    expect(host.visible()).toContain('read')
+  })
+
+  it('未知角色不应用任何黑名单：PA 缺省且没有手动绑定', async () => {
+    const host = createHost({ config: ROUTER_DENIES_READ })
+    await host.createAgent()
+
+    expect(host.visible()).toContain('read')
+  })
+
+  it('手动绑定补足 PA 没有答案的会话', async () => {
+    const host = createHost({
+      config: { ...ROUTER_DENIES_READ, roleBindings: { 'session-1': 'router' } },
+      roles: () => undefined,
+    })
+    await host.createAgent()
+
+    expect(host.visible()).not.toContain('read')
+  })
+
+  it('PA 判定的角色优先于手动绑定', async () => {
+    const host = createHost({
+      config: { ...ROUTER_DENIES_READ, roleBindings: { 'session-1': 'router' } },
+      roles: () => 'worker',
+    })
+    await host.createAgent()
+
+    expect(host.visible()).toContain('read')
+  })
+
+  it('Router 黑名单里的 Skill 不出现在 Router 的目录里', async () => {
+    const host = createHost({
+      config: { ...DEFAULT_CONFIG, blacklist: { router: ['skill:alpha-skill'], worker: [] } },
+      roles: () => 'router',
+    })
+    await host.createAgent()
+
+    const decision = await host.preStep() as { messages: { content: { text: string }[] }[] }
+
+    expect(decision.messages.flatMap(message => message.content.map(part => part.text)).join('\n')).not.toContain(
+      'alpha-skill',
+    )
+  })
+
+  it('Worker 的目录仍包含被 Router 禁用的 Skill', async () => {
+    const host = createHost({
+      config: { ...DEFAULT_CONFIG, blacklist: { router: ['skill:alpha-skill'], worker: [] } },
+      roles: () => 'worker',
+    })
+    await host.createAgent()
+
+    const decision = await host.preStep() as { messages: { content: { text: string }[] }[] }
+
+    expect(decision.messages.flatMap(message => message.content.map(part => part.text)).join('\n')).toContain(
+      'alpha-skill',
+    )
+  })
+
+  it('meta_search 不为 Router 召回被该角色禁用的工具', async () => {
+    const host = createHost({ config: ROUTER_RECALL_DENIES_READ, roles: () => 'router' })
+    await host.createAgent()
+    const metaSearch = host.globalTools.find(tool => tool.name === 'meta_search')
+    if (metaSearch === undefined) throw new Error('meta_search not registered')
+
+    const value = await metaSearch.execute(
+      { names: 'read' },
+      { agent: host.agent as never, signal: new AbortController().signal } as never,
+    ) as { tools: { name: string }[] }
+
+    expect(value.tools).toEqual([])
+  })
+
+  it('meta_search 对 Worker 仍能召回同一工具', async () => {
+    const host = createHost({ config: ROUTER_RECALL_DENIES_READ, roles: () => 'worker' })
+    await host.createAgent()
+    const metaSearch = host.globalTools.find(tool => tool.name === 'meta_search')
+    if (metaSearch === undefined) throw new Error('meta_search not registered')
+
+    const value = await metaSearch.execute(
+      { names: 'read' },
+      { agent: host.agent as never, signal: new AbortController().signal } as never,
+    ) as { tools: { name: string }[] }
+
+    expect(value.tools.map(tool => tool.name)).toEqual(['read'])
+  })
+
+  it('快照暴露会话角色与来源', async () => {
+    const host = createHost({ roles: () => 'router' })
+    await host.createAgent()
+
+    const snapshot = await host.snapshot()
+
+    expect(snapshot.rolesAvailable).toBe(true)
+    expect(snapshot.sessions).toEqual([{ id: 'session-1', role: 'router', roleSource: 'pa' }])
+  })
+
+  it('没有 PA 时快照仍给出绑定来源的角色', async () => {
+    const host = createHost({ config: { ...DEFAULT_CONFIG, roleBindings: { 'session-1': 'worker' } } })
+    await host.createAgent()
+
+    const snapshot = await host.snapshot()
+
+    expect(snapshot.rolesAvailable).toBe(false)
+    expect(snapshot.sessions).toEqual([{ id: 'session-1', role: 'worker', roleSource: 'binding' }])
+  })
+
+  it('未知角色的会话在快照里只带来源，不带角色', async () => {
+    const host = createHost()
+    await host.createAgent()
+
+    const snapshot = await host.snapshot()
+
+    expect(snapshot.sessions).toEqual([{ id: 'session-1', roleSource: 'unknown' }])
   })
 })
 

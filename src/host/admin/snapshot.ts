@@ -50,7 +50,11 @@ export function computeWarnings(
     const blacklisted = new Set(config.blacklist[role])
     const hit = pool.filter(entry => resident.has(entry.id) && blacklisted.has(entry.id))
     if (hit.length > 0) {
-      warnings.push({ code: 'blacklist-excludes-resident', capabilityIds: hit.map(entry => entry.id) })
+      warnings.push({
+        code: 'blacklist-excludes-resident',
+        capabilityIds: hit.map(entry => entry.id),
+        roles: [role],
+      })
     }
   }
 
@@ -62,6 +66,8 @@ export interface SnapshotInput {
   capabilities: readonly CapabilityEntry[]
   config: CapabilityConfig
   rolesAvailable: boolean
+  /** 活跃会话的角色判定；读不到活跃会话时缺省。 */
+  sessions?: SnapshotResponse['sessions']
   embedding: EmbeddingStatus
   diagnostics?: SnapshotResponse['diagnostics']
 }
@@ -78,6 +84,7 @@ export function buildSnapshot(input: SnapshotInput): SnapshotResponse {
     capabilities: [...input.capabilities],
     config: input.config,
     rolesAvailable: input.rolesAvailable,
+    ...input.sessions === undefined ? {} : { sessions: [...input.sessions] },
     embedding: input.embedding,
     warnings: computeWarnings(input.config, input.capabilities),
     ...input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics },

@@ -6,15 +6,23 @@
 // 服务缺席、账本未就绪、返回了不认识的值，一律按「未知角色」处理——
 // 未知角色不应用任何黑名单，宁可多给能力也不凭猜测禁用。
 
-import type { SessionRoleName } from '../../shared/config.ts'
+import type { RoleSource, SessionRoleName } from '../../shared/config.ts'
 
 /** `ctx.paRoles` 的最小形状；用结构守卫收窄，不 import PA 的类型。 */
 interface PaRolesLike {
   roleOf?: (sessionId: string) => unknown
 }
 
+/** 一次角色判定的结果：角色本身与它来自哪里。 */
+export interface RoleResolution {
+  /** 角色；`undefined` 表示未知。 */
+  role: SessionRoleName | undefined
+  /** 判定来源，界面据此区分「PA 判定」「手动绑定」与「未知」。 */
+  source: RoleSource
+}
+
 export interface RoleResolver {
-  /** 是否检测到 `ctx.paRoles` 服务；界面据此决定是否显示黑名单区。 */
+  /** 是否检测到 `ctx.paRoles` 服务；界面据此决定是否显示角色区。 */
   readonly available: boolean
   /**
    * 判定会话角色。
@@ -22,6 +30,12 @@ export interface RoleResolver {
    * @returns 角色，或 `undefined` 表示未知。
    */
   roleOf(sessionId: string): SessionRoleName | undefined
+  /**
+   * 判定会话角色并给出来源。
+   * @param sessionId - 会话身份。
+   * @returns 角色与来源。
+   */
+  resolve(sessionId: string): RoleResolution
 }
 
 export interface RoleResolverOptions {
@@ -46,20 +60,30 @@ export function createRoleResolver(options: RoleResolverOptions): RoleResolver {
     return typeof service === 'object' && service !== null ? (service as PaRolesLike) : undefined
   }
 
+  const resolve = (sessionId: string): RoleResolution => {
+    let reported: unknown
+    try {
+      reported = probe()?.roleOf?.(sessionId)
+    } catch {
+      // PA 账本未就绪时会拒绝查询；这里降级为「未知角色」而不是让调用方崩溃。
+      reported = undefined
+    }
+    if (reported === 'router' || reported === 'worker') return { role: reported, source: 'pa' }
+
+    // 手动绑定只补 PA 没有答案的会话：PA 的工单绑定是权威事实，
+    // 两处都猜的时候以它为准，避免「界面写的和实际生效的不一致」。
+    const bound = options.bindings()[sessionId]
+    if (bound === 'router' || bound === 'worker') return { role: bound, source: 'binding' }
+    return { role: undefined, source: 'unknown' }
+  }
+
   return {
     get available() {
       return probe()?.roleOf !== undefined
     },
     roleOf(sessionId) {
-      let reported: unknown
-      try {
-        reported = probe()?.roleOf?.(sessionId)
-      } catch {
-        // PA 账本未就绪时会拒绝查询；这里降级为「未知角色」而不是让调用方崩溃。
-        reported = undefined
-      }
-      if (reported === 'router' || reported === 'worker') return reported
-      return options.bindings()[sessionId]
+      return resolve(sessionId).role
     },
+    resolve,
   }
 }

@@ -7,7 +7,13 @@
 
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { API_PREFIX, ERROR_CODES, type ConfigWriteResponse, type ErrorResponse } from '../shared/api.ts'
+import {
+  API_PREFIX,
+  ERROR_CODES,
+  type ConfigWriteResponse,
+  type ErrorResponse,
+  type SessionRoleSnapshot,
+} from '../shared/api.ts'
 import { skillId, type CapabilityEntry } from '../shared/capability.ts'
 import type { ToolSource } from './catalog/collect.ts'
 import { toolId } from '../shared/capability.ts'
@@ -26,7 +32,7 @@ import type { HostContext } from './context.ts'
 import { EnforcementRegistry, type AgentScope } from './enforcement/registry.ts'
 import { RecalledStore, type SessionLike } from './enforcement/recalled.ts'
 import { renderIndex, selectToolIndex, shouldInjectIndex } from './prompt/index-section.ts'
-import { createRoleResolver } from './roles/resolve.ts'
+import { createRoleResolver, type RoleResolver } from './roles/resolve.ts'
 import { skillPayload } from './search/payload.ts'
 import { toolNamesOf, toolPayloadsOf } from './search/seen.ts'
 import { SelfmadeSkills } from './selfmade/skills.ts'
@@ -346,6 +352,8 @@ export function apply(ctx: HostContext, config?: Config): void {
               const current = store.read()
               const mcpServers = mcpServerNames(ctx)
               const selfmade = selfmadeTools.catalog()
+              // 活跃会话在一份快照里只取一次：能力目录与角色判定必须看到同一批会话。
+              const liveAgents = listLiveAgents(ctx, log)
               return buildSnapshot({
                 revision: store.revision,
                 capabilities: [
@@ -355,10 +363,11 @@ export function apply(ctx: HostContext, config?: Config): void {
                     selfmade.map(tool => ({ name: tool.name, description: tool.meta.description })),
                     mcpServers,
                   ),
-                  ...await collectSkillCapabilities(ctx, skillQuery, current, log, selfmadeSkills.names()),
+                  ...await collectSkillCapabilities(skillQuery, current, selfmadeSkills.names(), liveAgents),
                 ],
                 config: current,
                 rolesAvailable: roles.available,
+                sessions: sessionRolesOf(roles, liveAgents),
                 // M2 只有模式 A：向量检索恒为关闭状态。
                 embedding: { enabled: current.embedding.enabled, status: 'idle' },
                 diagnostics: {
@@ -459,13 +468,12 @@ function collectCapabilities(
  * preset 自带的 Skill 需要一次会话才能出现在列表里（§12 的已知限制）。
  */
 async function collectSkillCapabilities(
-  ctx: HostContext,
   deps: SkillQueryDependencies,
   config: CapabilityConfig,
-  log: (message: string) => void,
   selfmade: ReadonlySet<string>,
+  liveAgents: readonly AgentScope[],
 ): Promise<CapabilityEntry[]> {
-  const summaries = await allSkillSummaries(deps, listLiveAgents(ctx, log))
+  const summaries = await allSkillSummaries(deps, liveAgents)
   const skillToolExcluded = config.excluded.includes(SKILL_TOOL_ID)
   return collectSkills({
     skills: summaries,
@@ -511,6 +519,26 @@ function visibleToolsOf(agent: unknown, log: (message: string) => void): readonl
 /** 索引只放名称与摘要，与列表共用同一份摘要。 */
 function summariesOf(capabilities: readonly CapabilityEntry[]): Map<string, string> {
   return new Map(capabilities.filter(entry => entry.kind === 'tool').map(entry => [entry.name, entry.summary]))
+}
+
+/**
+ * 活跃会话的角色判定，供界面的「会话角色」区渲染。
+ *
+ * 按 id 排序：会话集合在两次快照之间通常稳定，顺序抖动会让列表每次刷新都重排。
+ *
+ * @param roles - 角色解析器。
+ * @param agents - 活跃 agent。
+ * @returns 每会话一条；未知角色不带 `role` 字段。
+ */
+function sessionRolesOf(roles: RoleResolver, agents: readonly AgentScope[]): SessionRoleSnapshot[] {
+  return agents
+    .map(agent => {
+      const resolution = roles.resolve(agent.id)
+      return resolution.role === undefined
+        ? { id: agent.id, roleSource: resolution.source }
+        : { id: agent.id, role: resolution.role, roleSource: resolution.source }
+    })
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 }
 
 async function writeConfig(store: ConfigStore, patch: unknown): Promise<ConfigOutcome> {

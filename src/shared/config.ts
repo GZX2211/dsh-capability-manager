@@ -20,6 +20,14 @@ export const SKILL_TOOL_ID: CapabilityId = 'tool:skill'
 /** 会话角色。判定由 `ctx.paRoles` 提供，本插件只消费。 */
 export type SessionRoleName = 'router' | 'worker'
 
+/**
+ * 角色判定的来源。
+ *
+ * `pa` 优先；`binding` 是手动绑定，只补 `paRoles` 没有答案的会话；
+ * `unknown` 表示两者都没答案，此时不应用任何黑名单。
+ */
+export type RoleSource = 'pa' | 'binding' | 'unknown'
+
 /** 向量检索配置；默认关闭。 */
 export interface EmbeddingConfig {
   enabled: boolean

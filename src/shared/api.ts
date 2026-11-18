@@ -4,7 +4,7 @@
 // Host 与 Client 共用，调用点不得硬编码这些字面量。
 
 import type { CapabilityEntry, CapabilityId } from './capability.ts'
-import type { CapabilityConfig, SessionRoleName } from './config.ts'
+import type { CapabilityConfig, RoleSource, SessionRoleName } from './config.ts'
 
 /** 插件 HTTP 面挂载前缀；Host 以 prefix 路由注册，Client 以此为唯一网络入口。 */
 export const API_PREFIX = '/capability-manager/api'
@@ -76,6 +76,23 @@ export interface SnapshotWarning {
   code: WarningCode
   /** 与该提示相关的能力，便于界面高亮。 */
   capabilityIds?: CapabilityId[]
+  /**
+   * 该提示由哪个角色的黑名单造成。
+   *
+   * 两个角色各排除一批能力时是两条独立提示，所以角色是提示自身的属性，
+   * 而不是挂在能力上的。
+   */
+  roles?: SessionRoleName[]
+}
+
+/** 一个活跃会话的角色判定结果；界面据此渲染「会话角色」区。 */
+export interface SessionRoleSnapshot {
+  /** 会话身份（宿主里 Agent.id 即 SessionId）。 */
+  id: string
+  /** 生效角色；`undefined` 表示未知，不应用黑名单。 */
+  role?: SessionRoleName
+  /** 角色来自 `ctx.paRoles`、手动绑定，还是无从判定。 */
+  roleSource: RoleSource
 }
 
 /** 向量检索子系统的运行状态；M1 恒为 idle。 */
@@ -93,6 +110,13 @@ export interface SnapshotResponse {
   config: CapabilityConfig
   /** 是否检测到 `ctx.paRoles`；为 false 时界面不显示角色黑名单区。 */
   rolesAvailable: boolean
+  /**
+   * 活跃会话的角色判定结果。
+   *
+   * 可选：宿主读不到活跃会话时不提供，界面按空列表处理。手动绑定只补
+   * `paRoles` 没有答案的会话，来源字段让用户看到某条绑定是否真的在生效。
+   */
+  sessions?: SessionRoleSnapshot[]
   embedding: EmbeddingStatus
   warnings: SnapshotWarning[]
   /**
