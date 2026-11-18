@@ -1,0 +1,5 @@
+# pnpm 12 的构建脚本白名单字段是 allowBuilds（onlyBuiltDependencies 已不再生效）。
+# onnxruntime-node 的二进制随包发布，postinstall 只做平台校验；允许它执行，
+# 避免每次安装都因 ERR_PNPM_IGNORED_BUILDS 失败。
+allowBuilds:
+  onnxruntime-node: true

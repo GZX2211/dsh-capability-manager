@@ -22,7 +22,9 @@ export default defineConfig([
     dts: false,
     clean: false,
     outExtensions: () => ({ js: '.js' }),
-    deps: { neverBundle: [/^@deepseek-ai\//] },
+    // onnxruntime-node 是原生模块（含平台二进制），只能外部引用：
+    // 打进产物既无法执行，也会把 lib 撑到几百 MB。
+    deps: { neverBundle: [/^@deepseek-ai\//, 'onnxruntime-node'] },
   },
   {
     name: 'client',
