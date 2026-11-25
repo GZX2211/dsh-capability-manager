@@ -52,10 +52,12 @@ export function Mcp({ describe, t }: McpProps) {
   const [dialog, setDialog] = useState<DialogState | undefined>(undefined)
 
   const servers = mcp.data?.servers ?? []
+  const ready = mcp.data !== undefined
   const available = mcp.data?.available ?? true
   const writable = mcp.data?.writable ?? false
-  // 按钮禁用时说明到底缺什么：没有管理器与不能写是两种环境问题。
-  const configureTitle = writable
+  // 数据未到位前不判定可写性：默认 available=true、writable=false 会让「编辑器不可用」
+  // 在加载窗口里闪一下。按钮标题同理，未加载时按正常主操作显示。
+  const configureTitle = !ready || writable
     ? t('mcpConfigAction')
     : mcp.data?.unavailableReason === 'manager-absent' ? t('mcpUnavailableManager') : t('mcpUnavailableEditor')
   const filtered = useMemo(() => filterMcpServers(servers, filter, query), [servers, filter, query])
@@ -112,7 +114,8 @@ export function Mcp({ describe, t }: McpProps) {
       </div>
 
       {notice !== undefined ? <p className="cm-notice">{notice}</p> : null}
-      {available && !writable ? <p className="cm-notice">{t('mcpUnavailableEditor')}</p> : null}
+      {/* 只在数据到位后判定：否则加载瞬间会闪出「编辑器不可用」再消失。 */}
+      {ready && available && !writable ? <p className="cm-notice">{t('mcpUnavailableEditor')}</p> : null}
 
       <div className="cm-content">
         {mcp.error !== undefined ? (
