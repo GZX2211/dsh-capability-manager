@@ -22,7 +22,7 @@ import { SKILL_TOOL_ID, type CapabilityConfig, type SessionRoleName } from '../s
 import { applyPatch } from './admin/mutate.ts'
 import { createSkillAction, revealAction } from './admin/selfmade.ts'
 import { createAdminHandler, type ConfigOutcome } from './admin/server.ts'
-import { registerCreatorSkill } from './builtin-skills/register.ts'
+import { registerBundledSkills } from './builtin-skills/register.ts'
 import { buildSnapshot } from './admin/snapshot.ts'
 import { buildToolCandidates } from './catalog/candidates.ts'
 import { collectTools } from './catalog/collect.ts'
@@ -256,11 +256,11 @@ export function apply(ctx: HostContext, config?: Config): void {
     }, 'capability-manager: self-made skills')
   })
 
-  // ---- 内置创建器 Skill：随包发布，正文里的状态目录占位符在注册时替换 ----
-  guard(log, 'register the capability-creator skill', () => {
-    const release = registerCreatorSkill({ skills: ctx.skills }, stateDir, { log })
+  // ---- 内置 Skill：随包发布，正文里的状态目录占位符在注册时替换 ----
+  guard(log, 'register the bundled skills', () => {
+    const release = registerBundledSkills({ skills: ctx.skills }, stateDir, { log })
     if (release === undefined) return
-    ctx.effect(() => release, 'capability-manager: capability-creator')
+    ctx.effect(() => release, 'capability-manager: bundled skills')
   })
 
   // ---- Skill 目录注入（pre-step） ----
