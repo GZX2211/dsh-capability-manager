@@ -37,6 +37,10 @@ export function applyPatch(config: CapabilityConfig, patch: unknown): ApplyPatch
       return setExcluded(config, record)
     case 'set-resident':
       return setResident(config, record)
+    case 'set-excluded-many':
+      return setExcludedMany(config, record)
+    case 'set-resident-many':
+      return setResidentMany(config, record)
     case 'set-blacklist':
       return setBlacklist(config, record)
     case 'clear-blacklist':
@@ -82,6 +86,40 @@ function setResident(config: CapabilityConfig, record: Record<string, unknown>):
     return { ok: true, config: { ...config, resident: addUnique(config.resident, id) } }
   }
   return { ok: true, config: { ...config, resident: config.resident.filter(residentId => residentId !== id) } }
+}
+
+function setExcludedMany(config: CapabilityConfig, record: Record<string, unknown>): ApplyPatchResult {
+  const ids = capabilityIdList(record)
+  if (ids === undefined) return badRequest('ids 必须是非空的能力标识数组，元素形如 tool:<name> 或 skill:<name>')
+  const value = booleanValue(record)
+  if (value === undefined) return badRequest('value 必须是布尔值')
+
+  if (value) {
+    return {
+      ok: true,
+      config: {
+        ...config,
+        excluded: ids.reduce((acc, id) => addUnique(acc, id), config.excluded),
+        // 与单条排除同一条不变量：移出池时同时取消常驻。
+        resident: config.resident.filter(residentId => !ids.includes(residentId)),
+      },
+    }
+  }
+  return { ok: true, config: { ...config, excluded: config.excluded.filter(excludedId => !ids.includes(excludedId)) } }
+}
+
+function setResidentMany(config: CapabilityConfig, record: Record<string, unknown>): ApplyPatchResult {
+  const ids = capabilityIdList(record)
+  if (ids === undefined) return badRequest('ids 必须是非空的能力标识数组，元素形如 tool:<name> 或 skill:<name>')
+  const value = booleanValue(record)
+  if (value === undefined) return badRequest('value 必须是布尔值')
+
+  if (value) {
+    // 不变量：常驻必须是池内能力。界面只传池内条目，这里仍过滤掉池外的以防越界写入。
+    const eligible = ids.filter(id => !config.excluded.includes(id))
+    return { ok: true, config: { ...config, resident: eligible.reduce((acc, id) => addUnique(acc, id), config.resident) } }
+  }
+  return { ok: true, config: { ...config, resident: config.resident.filter(residentId => !ids.includes(residentId)) } }
 }
 
 function setBlacklist(config: CapabilityConfig, record: Record<string, unknown>): ApplyPatchResult {
@@ -130,6 +168,17 @@ function setRoleBinding(config: CapabilityConfig, record: Record<string, unknown
 function capabilityId(record: Record<string, unknown>): CapabilityId | undefined {
   if (typeof record.id !== 'string') return undefined
   return parseId(record.id) === undefined ? undefined : record.id
+}
+
+/** 收窄批量标识；为空或含非法元素时返回 undefined，由调用方给出可行动的错误。 */
+function capabilityIdList(record: Record<string, unknown>): CapabilityId[] | undefined {
+  if (!Array.isArray(record.ids) || record.ids.length === 0) return undefined
+  const ids: CapabilityId[] = []
+  for (const value of record.ids) {
+    if (typeof value !== 'string' || parseId(value) === undefined) return undefined
+    ids.push(value)
+  }
+  return ids
 }
 
 function booleanValue(record: Record<string, unknown>): boolean | undefined {

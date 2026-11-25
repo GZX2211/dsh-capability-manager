@@ -96,6 +96,8 @@ const CSS = `
 .cm-pane-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .cm-pane-clear { height: 24px; padding: 0 8px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.95)); }
 .cm-pane-clear:hover:not(:disabled) { color: var(--dsw-alias-label-primary, inherit); }
+/* 批量动作与标题栏同高：它们是标题栏里的次级操作，不应把 header 撑高。 */
+.cm-pane-bulk { height: 24px; padding: 0 8px; font-size: 12px; line-height: 18px; }
 .cm-tag-anchor { display: inline-flex; }
 .cm-session-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 6px; }
 .cm-session-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; }

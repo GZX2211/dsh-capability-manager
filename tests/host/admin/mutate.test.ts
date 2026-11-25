@@ -126,6 +126,79 @@ describe('池与常驻', () => {
   })
 })
 
+describe('批量池与常驻', () => {
+  it('批量移出池：全部进入排出池并取消常驻', () => {
+    const result = applyPatch(config({ resident: ['tool:meta_search', 'tool:read'] }), {
+      op: 'set-excluded-many',
+      ids: ['tool:read', 'tool:grep'],
+      value: true,
+      revision: 0,
+    })
+
+    expect(result.ok && result.config.excluded).toEqual(['tool:read', 'tool:grep'])
+    expect(result.ok && result.config.resident).toEqual(['tool:meta_search'])
+  })
+
+  it('批量移入池：从排出池移除', () => {
+    const result = applyPatch(config({ excluded: ['tool:read', 'tool:grep', 'tool:bash'] }), {
+      op: 'set-excluded-many',
+      ids: ['tool:read', 'tool:grep'],
+      value: false,
+      revision: 0,
+    })
+
+    expect(result.ok && result.config.excluded).toEqual(['tool:bash'])
+  })
+
+  it('批量设为常驻：池外条目被过滤，常驻仍是池的子集', () => {
+    const result = applyPatch(config({ excluded: ['tool:grep'], resident: ['tool:meta_search'] }), {
+      op: 'set-resident-many',
+      ids: ['tool:read', 'tool:grep'],
+      value: true,
+      revision: 0,
+    })
+
+    expect(result.ok && result.config.resident).toEqual(['tool:meta_search', 'tool:read'])
+  })
+
+  it('批量取消常驻：只移除给定条目', () => {
+    const result = applyPatch(config({ resident: ['tool:meta_search', 'tool:read', 'tool:grep'] }), {
+      op: 'set-resident-many',
+      ids: ['tool:read', 'tool:grep'],
+      value: false,
+      revision: 0,
+    })
+
+    expect(result.ok && result.config.resident).toEqual(['tool:meta_search'])
+  })
+
+  it('重复条目不会产生重复项', () => {
+    const result = applyPatch(config({ excluded: ['tool:read'] }), {
+      op: 'set-excluded-many',
+      ids: ['tool:read', 'tool:read'],
+      value: true,
+      revision: 0,
+    })
+
+    expect(result.ok && result.config.excluded).toEqual(['tool:read'])
+  })
+
+  it('拒绝空数组', () => {
+    expect(applyPatch(DEFAULT_CONFIG, { op: 'set-excluded-many', ids: [], value: true, revision: 0 }))
+      .toMatchObject({ ok: false, code: 'bad-request' })
+  })
+
+  it('拒绝含非法标识的数组', () => {
+    expect(applyPatch(DEFAULT_CONFIG, { op: 'set-resident-many', ids: ['tool:read', 'read'], value: true, revision: 0 }))
+      .toMatchObject({ ok: false, code: 'bad-request' })
+  })
+
+  it('拒绝非布尔的开关值', () => {
+    expect(applyPatch(DEFAULT_CONFIG, { op: 'set-excluded-many', ids: ['tool:read'], value: 'yes', revision: 0 }))
+      .toMatchObject({ ok: false, code: 'bad-request' })
+  })
+})
+
 describe('角色黑名单', () => {
   it('加入黑名单', () => {
     const result = applyPatch(DEFAULT_CONFIG, {

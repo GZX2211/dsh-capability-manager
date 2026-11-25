@@ -167,6 +167,25 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
   )
   const reveal = useCallback((id: string) => void snapshot.reveal(id), [snapshot.reveal])
 
+  // 批量动作只作用于当前筛选结果：两侧都取 partition（已按筛选、搜索与池归属切好），
+  // 取全量配置会把看不见的条目一起改掉。
+  const pooledIds = useMemo(() => partition.pooled.map(entry => entry.id), [partition.pooled])
+  const excludedShownIds = useMemo(() => partition.excluded.map(entry => entry.id), [partition.excluded])
+  const allResident = pooledIds.length > 0 && pooledIds.every(id => config?.resident.includes(id) === true)
+
+  const moveAllIn = useCallback(() => {
+    if (excludedShownIds.length === 0) return
+    void snapshot.mutate({ op: 'set-excluded-many', ids: [...excludedShownIds], value: false })
+  }, [excludedShownIds, snapshot.mutate])
+  const moveAllOut = useCallback(() => {
+    if (pooledIds.length === 0) return
+    void snapshot.mutate({ op: 'set-excluded-many', ids: [...pooledIds], value: true })
+  }, [pooledIds, snapshot.mutate])
+  const toggleAllResident = useCallback(() => {
+    if (pooledIds.length === 0) return
+    void snapshot.mutate({ op: 'set-resident-many', ids: [...pooledIds], value: !allResident })
+  }, [pooledIds, allResident, snapshot.mutate])
+
   /**
    * 手动创建：成功之后把视线带到新行。
    *
@@ -289,6 +308,15 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
                   disabled={snapshot.saving}
                   ready
                   resetKey={resetKey}
+                  bulkActions={[
+                    {
+                      key: 'move-all-in',
+                      label: t('moveAllIn'),
+                      hint: t('moveAllInHint'),
+                      disabled: excludedShownIds.length === 0,
+                      onClick: moveAllIn,
+                    },
+                  ]}
                   onAdd={addToPool}
                   onRemove={removeFromPool}
                   onToggleResident={toggleResident}
@@ -317,6 +345,22 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
                   disabled={snapshot.saving}
                   ready
                   resetKey={resetKey}
+                  bulkActions={[
+                    {
+                      key: 'resident-all',
+                      label: t(allResident ? 'residentAllOff' : 'residentAllOn'),
+                      hint: t(allResident ? 'residentAllOffHint' : 'residentAllOnHint'),
+                      disabled: pooledIds.length === 0,
+                      onClick: toggleAllResident,
+                    },
+                    {
+                      key: 'move-all-out',
+                      label: t('moveAllOut'),
+                      hint: t('moveAllOutHint'),
+                      disabled: pooledIds.length === 0,
+                      onClick: moveAllOut,
+                    },
+                  ]}
                   onAdd={addToPool}
                   onRemove={removeFromPool}
                   onToggleResident={toggleResident}

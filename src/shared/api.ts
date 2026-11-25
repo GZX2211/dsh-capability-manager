@@ -162,6 +162,15 @@ export interface SnapshotResponse {
 export type ConfigPatchInput =
   | { op: 'set-excluded'; id: CapabilityId; value: boolean }
   | { op: 'set-resident'; id: CapabilityId; value: boolean }
+  /**
+   * 批量移入 / 移出：筛选后的整体操作要一次落盘。
+   *
+   * 逐条提交会让一次点击产生 N 次写入与 N 次刷新，中途失败还会留下半套状态；
+   * 批量语义让 revision 只前进一次。
+   */
+  | { op: 'set-excluded-many'; ids: CapabilityId[]; value: boolean }
+  /** 批量常驻；`value: false` 是批量取消常驻。 */
+  | { op: 'set-resident-many'; ids: CapabilityId[]; value: boolean }
   | { op: 'set-blacklist'; role: SessionRoleName; id: CapabilityId; value: boolean }
   | { op: 'clear-blacklist'; role: SessionRoleName }
   /**
