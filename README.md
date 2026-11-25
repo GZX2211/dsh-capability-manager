@@ -1,13 +1,12 @@
 <p align="center">
-  <!-- 配图占位：项目主视觉 / 能力管理主界面横幅 -->
-  <img src="" width="100%" />
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-capability-manager/main/assets/工具页穿梭框.png" width="100%" />
 </p>
 
 <h1 align="center">能力管理插件</h1>
 
 <p align="center">
   基于 <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> 打造的全局能力治理插件<br>
-  模型启动时只带最小能力集，其余工具与 Skill 通过 meta_search 按需召回；能力池、常驻、角色黑名单与 MCP 连接在同一个界面里治理
+  模型启动时只带最小能力集，其余工具与 Skill 通过 meta_search 按需召回，减少复杂选择干扰 Agent 判断
 </p>
 
 <p align="center">
@@ -45,30 +44,22 @@ Skill = 官方 Skill + 自建 Skill
 
 开箱状态：全部能力在池内，只常驻 `meta_search` 与 `skill` 两个元能力，黑名单为空，向量检索关闭。新会话一开始只有这两个入口，其余能力由模型按任务需要召回。
 
-> 插件不重建任何运行时能力，只通过 Harness 的公开接口收放可见性；配置是真源，执行面是投影。
-
 ---
 
 ## 核心亮点
 
 ✦ **最小启动面 + 按需召回**
-  - 启动只注入常驻能力的完整 schema；其余能力经 `meta_search` 召回后进入会话，**从下一步开始可调用**，新增能力不破坏 KV 前缀缓存。
+  - 启动只注入常驻能力的完整 schema；其余能力经 `meta_search` 召回后进入会话，**从下一步开始可调用**，新增能力**不破坏 KV 前缀缓存**。
   - 召回记录可从会话日志重建：**重启后此前召回的能力仍然可用**，不需要重新召回。
   - 返回前执行**载荷级去重**：与当前上下文同类型载荷逐字一致的项被剔除，同一份 schema 不会反复占用上下文。
 
-✦ **工具与 Skill 统一治理**
-  - 通过同名 shadow 接管官方 `skill` 工具与技能目录，Skill 与工具受同一套能力池、常驻与黑名单管辖。
-  - 用户在输入框用 `/名称` 显式加载 Skill 时**不受能力池限制**——显式使用优先，人在回路不被治理面阻断。
-
 <table>
   <tr>
-    <td width="50%" valign="top">
-      <!-- 配图占位：工具页双栏穿梭框（排出池 / 能力池 / 常驻开关） -->
-      <img src="" width="100%" />
+    <td width="35%" valign="top">
+      <img src="https://raw.githubusercontent.com/GZX2211/dsh-capability-manager/main/assets/新增mcp.png" width="100%" />
     </td>
-    <td width="50%" valign="top">
-      <!-- 配图占位：设置页（向量检索 / 角色黑名单） -->
-      <img src="" width="100%" />
+    <td width="65%" valign="top">
+      <img src="https://raw.githubusercontent.com/GZX2211/dsh-capability-manager/main/assets/主页.png" width="100%" />
     </td>
   </tr>
 </table>
@@ -79,25 +70,15 @@ Skill = 官方 Skill + 自建 Skill
   - **模式 A（默认，向量检索关闭）**：注入工具索引与技能目录（只有名称与用途摘要）；`names` 通道按正则精确召回工具，永远可用、支持批量。
   - **模式 B（向量检索开启）**：不再注入索引，`keywords` 通道按语义相似度召回工具与 Skill。模型为 `bge-small-zh-v1.5`（int8 量化 ONNX，约 24 MB），首次开启联网下载并校验，失败保持关闭并提示原因。
 
-✦ **角色黑名单（可选集成）**
-  - 仅在检测到 Personal Agent 的 `paRoles` 服务时出现 Router / Worker 两个配置区；黑名单优先级最高，可排除池内与常驻能力，只作用于对应角色的会话。
-  - 角色优先由 Personal Agent 判定，手动绑定只补它没有判定的会话；未识别角色的会话不受任何黑名单影响。
-
 ✦ **MCP 连接管理，与官方同源**
   - 界面内新建 / 编辑 / 启停 / 删除 MCP 服务器，支持批量导入 `mcp.json`；开关热生效，无需重启。
-  - 读官方 `mcp-manager`、写官方 `config-editor`：与 Agent 和官方 Settings 是**同一份配置**，互相可见、状态一致，插件不持有副本。
 
 ✦ **自建能力，热生效**
-  - 内置 `capability-creator` Skill：让 Agent 判断类型并直接写出自建工具（声明式 shell / http，或代码 `impl.mjs`）与自建 Skill，写入状态目录即被监听注册，无需重启。
+  - 内置 `skill-creator`、`tool-creator` Skill：让 Agent 直接写出自建工具（声明式 shell / 代码脚本式）与自建 Skill，写入状态目录即被监听注册，无需重启。
   - 也可在界面「手动创建技能」生成骨架，编辑后移入能力池启用；新建能力默认进池、默认不常驻。
 
-✦ **失败朝不生效降级**
-  - 吸收失败、候选为空、名单为空时一律不收紧；绝不出现「工具被收走、召回又不可用」的组合。限制有插件卸载与 agent 销毁两条独立释放路径。
-
-<p align="center">
-  <!-- 配图占位：会话中 meta_search 召回工具的实际效果 -->
-  <img src="" width="100%" />
-</p>
+✦ **角色黑名单（可选集成）**
+  - 仅在检测到 Personal Agent 的 `paRoles` 服务时出现 Router / Worker 两个配置区；黑名单优先级最高，可排除池内与常驻能力，只作用于对应角色的会话。
 
 ---
 
@@ -125,57 +106,58 @@ Skill = 官方 Skill + 自建 Skill
 |---|---|---|
 | **`meta_search`** | 工具 | 召回池内能力：`names`（正则名称组，只召回工具，永远可用）、`keywords`（语义，仅模式 B）、`limit`（默认 20，上限 50）；返回工具完整 schema 与 Skill 索引条目 |
 | **`skill`** | 工具（shadow） | 按名称加载 Skill 正文；加载前校验能力池与角色黑名单 |
-| **`capability-creator`** | 内置 Skill | 指导 Agent 创建自建工具 / 自建 Skill / 配置 MCP：判断类型、给出文件写法、校验名称冲突，写入即热生效 |
+| **`skill-creator`** | 内置 Skill | 指导 Agent 创建自建 Skill，写入即热生效 |
+| **`tool-creator`** | 内置 Skill | 指导 Agent 创建自建工具，写入即热生效 |
 
 > 召回的工具从**下一步**开始可调用：restriction 重建在下一个 step 生效，同一 step 内照返回的 schema 直接调用会失败，这是增量供给的固有延迟。
 
 ---
 
-## 安装（Windows）
+## 📦 安装
 
-> **版本适配**：本插件适配 **DeepSeek Harness `0.2.2-rc` 系列**（开发验证于 `0.2.2-rc.3`，Desktop profile `desktop`）。请先安装或升级宿主（升级前先在外部终端**完全停止 dsh 进程**）：
+> **版本适配**：本插件适配 **DeepSeek Harness `0.2.2-rc.5`及以上版本**。请先安装或升级宿主（升级前先在外部终端**完全停止 dsh 进程**）：
 >
-> ```bash
-> npm install -g @deepseek-ai/dsh@0.2.2-rc.3
-> ```
 > tips：可直接将以下段落复制给 Claude Codex 等 AI 助手安装该插件。使用 web profile 时，把下文命令中的 `desktop` 换成 `web`。
 
-1. **文件管理器定位**：`%USERPROFILE%\.dsh\profiles\desktop\pnpm-workspace.yaml`，在其中添加：
+### 方式一：一键安装全部（推荐）
 
-```yaml
-allowBuilds:
-  onnxruntime-node: true
+我们提供了一个聚合包，包含以下所有功能：
+- `dsh-capability-manager`（能力管理器）
+- `dsh-personal-agent`（个人助手）
+- `dsh-run-python`（Python 工作台）
+
+在终端执行以下命令，即可一次性安装并配置所有插件：
+
+**桌面端**（推荐点击插件页面直接输入包名安装）：
+
 ```
-
-2. **运行插件安装命令**：
-
+dsh-gzx-plugin
+```
+或
 ```bash
-dsh plugin --profile desktop add "github:GZX2211/dsh-capability-manager#master"
+dsh plugin --profile desktop add dsh-gzx-plugin
 ```
 
-3. **桌面端可直接在左上角插件页面内添加并安装**：
+---
 
-```
-github:GZX2211/dsh-capability-manager#master
-```
+### 方式二：按需单独安装
 
-4. **验证挂载**：（可选）
-
+[能力管理器](https://github.com/GZX2211/dsh-capability-manager "如果你需要 meta_search 的 tool 按需召回功能，不妨了解一下")
 ```bash
-dsh --profile desktop --dump-config | findstr "capability-manager"
+dsh plugin add dsh-capability-manager
 ```
 
-5. **重启** dsh 或桌面端。打开管理页：点击官方**左侧边栏的「能力管理」入口**（位于「插件」按钮下方）即完整管理界面。
+[个人助手](https://github.com/GZX2211/dsh-personal-agent "如果你需要一个能自己“主动”干活的助手，不妨了解一下（通常与另两个插件搭配使用，否则会缺失部分能力）")
+```bash
+dsh plugin add dsh-personal-agent
+```
+
+[python 工作台](https://github.com/GZX2211/dsh-run-python "如果你需要一个能直接执行 Python 代码并逐 cell 维持内核状态的工具，不妨了解一下")
+```bash
+dsh plugin add dsh-run-python
+```
 
 ### 安装问题速查
-
-**出现 `Host key verification failed` 报错**
-
-在 **PowerShell** 或 **CMD** 中执行：
-
-```bash
-git config --global url."https://github.com/".insteadOf "git@github.com:"
-```
 
 **pnpm 拦截提示：声明了构建脚本，需要 `allowBuilds`**（常见）
 
@@ -194,7 +176,7 @@ dsh plugin --profile desktop remove dsh-capability-manager
 - 了解项目架构？请看 [架构文档](docs/architecture.md)
 - 参与贡献？请看 [贡献](docs/CONTRIBUTING.md)
 - 了解如何使用插件？请看 [用户使用手册](docs/USER_GUIDE.md)
-- 二次开发？请看 [项目开发规范](AGENTS.md)
+- 二次开发？请看 [开发规范](AGENTS.md)
 - 如何安装以及项目概览？本文件 [README.md](README.md)
 
 ---

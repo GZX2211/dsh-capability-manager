@@ -1,13 +1,12 @@
 <p align="center">
-  <!-- Image placeholder: project banner / capability manager main view -->
-  <img src="" width="100%" />
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-capability-manager/main/assets/工具页穿梭框.png" width="100%" />
 </p>
 
-<h1 align="center">Capability Manager</h1>
+<h1 align="center">Capability Manager Plugin</h1>
 
 <p align="center">
-  A global capability-governance plugin built on <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a><br>
-  The model starts with a minimal capability set and recalls the rest through meta_search; the pool, residency, role blacklists, and MCP connections are governed in one place
+  A global capability governance plugin built on <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a><br>
+  The model starts with only a minimal capability set; other tools and Skills are recalled on demand via meta_search, reducing the interference of complex choices with Agent judgment
 </p>
 
 <p align="center">
@@ -26,78 +25,60 @@
 
 ---
 
-## Positioning
+## Project Positioning
 
-The set of tools visible to the model grows with every plugin: each tool's full schema consumes context and KV prefix space, and the more tools there are, the wider the model's choice surface and the higher the cost of judgment.
+The set of tools visible to the model expands as plugins grow: the full schema of every tool consumes context and KV prefix; the more tools there are, the broader the model's choice space and the higher the decision cost.
 
-This plugin shifts capability supply from "statically full" to "a governable on-demand surface": the **capability pool** is a hard whitelist, **residency** defines the minimal startup-visible set, and **`meta_search`** is the on-demand recall channel. When dsh-personal-agent (the same author's personal-agent plugin) is detected, two **role blacklists** (Router / Worker) are layered on top.
+This plugin changes capability provisioning from "static full set" to "governable on-demand surface": the **Capability Pool** is a hard allowlist, **Resident** determines the minimal set visible at startup, and **`meta_search`** is the on-demand recall channel; when dsh-personal-agent (a personal agent plugin by the same author) is detected, two **role blacklists** for Router / Worker are layered on top.
 
 ```text
-Capability = Tools + Skills
-Tools      = official tools + custom tools + MCP tools
-Skills     = official skills + custom skills
+Capability = Tool + Skill
+Tool = Official tool + Custom tool + MCP tool
+Skill = Official Skill + Custom Skill
 
 Decision chain (first match wins):
 
-  role blacklist ──► pool ──► residency ──► meta_search recall ──► use
-  (highest priority) (hard whitelist) (visible at start) (on-demand supply)
+  Role blacklist ──► Capability pool ──► Resident ──► meta_search recall ──► Use
+  (highest priority)  (hard allowlist)  (visible at startup)  (on-demand supply)
 ```
 
-Out of the box: every capability is in the pool, only the two meta capabilities `meta_search` and `skill` are resident, blacklists are empty, and vector search is off. A new session starts with just these two entry points; the model recalls everything else as the task requires.
-
-> The plugin rebuilds no runtime capability; it only opens and closes visibility through Harness's public interfaces. Configuration is the source of truth; enforcement is a projection.
+Out-of-the-box state: all capabilities are in the pool, only the two meta capabilities `meta_search` and `skill` are resident, the blacklist is empty, and vector retrieval is off. A new session starts with only these two entries; other capabilities are recalled by the model as tasks require.
 
 ---
 
 ## Highlights
 
-✦ **Minimal startup surface + on-demand recall**
-  - Only resident capabilities' full schemas are injected at startup; everything else enters the session through `meta_search` and **becomes callable from the next step on**, so new capabilities never break the KV prefix cache.
-  - Recall records are rebuilt from the session log: **capabilities recalled earlier remain available after a restart**, with no need to recall them again.
-  - **Payload-level deduplication** runs before every return: items byte-identical to a same-type payload already in the current context are dropped, so the same schema never occupies the context twice.
-
-✦ **Tools and Skills under one governance**
-  - A same-name shadow takes over the official `skill` tool and the skill catalog, so Skills and tools are governed by the same pool, residency, and blacklists.
-  - Loading a Skill explicitly with `/name` in the composer is **not restricted by the pool**—explicit use outranks governance; the human in the loop is never blocked.
+✦ **Minimum startup surface + on-demand recall**
+  - At startup, only the full schemas of resident capabilities are injected; other capabilities enter the session after being recalled via `meta_search` and **become callable from the next step**. Newly added capabilities **do not break the KV prefix cache**.
+  - Recall records can be rebuilt from the session log: **previously recalled capabilities remain available after restart**, without needing to be recalled again.
+  - **Payload-level deduplication** is performed before returning: items whose same-type payload is verbatim identical to the current context are removed, so the same schema does not repeatedly occupy context.
 
 <table>
   <tr>
-    <td width="50%" valign="top">
-      <!-- Image placeholder: Tools tab transfer panes (Excluded / Pool / resident switches) -->
-      <img src="" width="100%" />
+    <td width="35%" valign="top">
+      <img src="https://raw.githubusercontent.com/GZX2211/dsh-capability-manager/main/assets/新增mcp.png" width="100%" />
     </td>
-    <td width="50%" valign="top">
-      <!-- Image placeholder: Settings tab (vector search / role blacklists) -->
-      <img src="" width="100%" />
+    <td width="65%" valign="top">
+      <img src="https://raw.githubusercontent.com/GZX2211/dsh-capability-manager/main/assets/主页.png" width="100%" />
     </td>
   </tr>
 </table>
 
-> The two transfer panes manage in-pool / out-of-pool; the in-row switch manages residency; the warning bar points out configurations that would break the recall chain in real time.
+> A dual-pane transfer box manages in-pool / out-of-pool capabilities, row switches manage residency; the risk banner points out in real time configurations that would break the recall chain.
 
 ✦ **Two recall channels, two operating modes**
-  - **Mode A (default, vector search off)**: a tool index and the skill catalog are injected (names and one-line summaries only); the `names` channel recalls tools by exact regex match—always available, batch-friendly.
-  - **Mode B (vector search on)**: no index is injected; the `keywords` channel recalls tools and Skills by semantic similarity. The model is `bge-small-zh-v1.5` (int8-quantized ONNX, ~24 MB), downloaded and verified on first enable; a failure keeps it off and reports why.
+  - **Mode A (default, vector retrieval off)**: injects the tool index and Skill catalog (names and usage summaries only); the `names` channel recalls tools exactly by regex, is always available, and supports batching.
+  - **Mode B (vector retrieval on)**: no longer injects the index; the `keywords` channel recalls tools and Skills by semantic similarity. The model is `bge-small-zh-v1.5` (int8 quantized ONNX, about 24 MB); on first enable it downloads and verifies over the network; on failure it stays off and displays the reason.
 
-✦ **Role blacklists (optional integration)**
-  - The Router / Worker panels appear only when Personal Agent's `paRoles` service is detected. A blacklist outranks everything: it excludes pooled and resident capabilities alike, and applies only to sessions of that role.
-  - Roles are decided by Personal Agent first; a manual binding only fills in sessions it does not decide. Sessions with an unknown role are unaffected by either blacklist.
+✦ **MCP connection management, same origin as official**
+  - Create / edit / enable / disable / delete MCP servers in the UI, with support for batch import of `mcp.json`; switches take effect hot without restart.
 
-✦ **MCP connection management, same source as the official one**
-  - Create / edit / enable / disable / delete MCP servers in the UI, with batch import of `mcp.json`; toggles take effect immediately, no restart needed.
-  - Reads go through the official `mcp-manager`, writes through the official `config-editor`: it is **the same configuration** the Agent and the official Settings use—mutually visible, consistent state, no copy held by the plugin.
+✦ **Custom capabilities, hot-effective**
+  - Built-in `skill-creator` and `tool-creator` Skills: let the Agent directly write custom tools (declarative shell / code-script) and custom Skills; writing to the state directory triggers watch and registration without restart.
+  - You can also use "Create Skill manually" in the UI to generate a skeleton, edit it, and move it into the Capability Pool to enable; new capabilities enter the pool by default and are non-resident by default.
 
-✦ **Custom capabilities, hot effect**
-  - The built-in `capability-creator` Skill lets the Agent decide the type and write custom tools (declarative shell / http, or code `impl.mjs`) and custom Skills directly; files written into the state directory are watched and registered without a restart.
-  - You can also generate a skeleton via "Create a skill manually" in the UI, edit it, then move it into the pool to enable it. New capabilities enter the pool by default and are not resident by default.
-
-✦ **Failures degrade toward "not in effect"**
-  - When absorption fails, candidates are empty, or the allow list is empty, nothing is tightened—never a combination of "tools taken away and recall unavailable". Restrictions have two independent release paths: plugin unload and agent disposal.
-
-<p align="center">
-  <!-- Image placeholder: meta_search recalling tools inside a live session -->
-  <img src="" width="100%" />
-</p>
+✦ **Role blacklist (optional integration)**
+  - Appears only when Personal Agent's `paRoles` service is detected, with two configuration sections: Router / Worker; the blacklist has the highest priority and can exclude in-pool and resident capabilities, and applies only to sessions of the corresponding role.
 
 ---
 
@@ -105,81 +86,82 @@ Out of the box: every capability is in the pool, only the two meta capabilities 
 
 | Concept | Description |
 |------|------|
-| **Capability** | Umbrella term for tools + Skills; tools come from official / custom / MCP sources, Skills from official / custom |
-| **Capability pool** | The full set of capabilities currently allowed; a hard whitelist. Out-of-pool capabilities cannot be called, recalled, or injected into context |
-| **Excluded** | Capabilities moved out of the pool; the left pane in the UI—click the plus to put one back |
-| **Resident** | The subset available immediately at startup, selectable only from the pool; non-resident capabilities must be recalled via `meta_search` |
-| **`meta_search`** | The recall tool: `names` exact-regex channel (tools only) + `keywords` semantic channel (tools and Skills, mode B only); itself an ordinary pooled capability that can be excluded or made non-resident |
-| **`skill` (shadow)** | The taken-over Skill loader: validates the pool and blacklist, then renders the body; coordinates with the official catalog injection to avoid duplicates |
-| **Payload-level dedupe** | Before returning, each payload is compared byte-for-byte with same-type payloads in the current context; only exact matches are dropped. A tool index ≠ a tool schema—they never dedupe against each other |
-| **Tool index / skill catalog** | Name + summary lists injected in mode A: the index lists non-resident tools only, the catalog lists all pooled Skills; nothing is injected in mode B |
-| **Role blacklist** | Per-role exclusion lists for Router / Worker, highest priority; configurable only when Personal Agent is detected |
-| **Session role binding** | A manual fallback for naming a session's role; dormant whenever Personal Agent has already decided |
-| **Vector search** | The semantic-recall subsystem of mode B: model download and verification, WordPiece tokenization, CLS pooling, cosine top-K; vectors are cached incrementally by summary hash |
+| **Capability** | Collective term for tools + Skills; tools include three sources: official / custom / MCP, and Skills include two sources: official / custom |
+| **Capability Pool** | The full set of capabilities currently usable, a hard allowlist; out-of-pool capabilities cannot be called, recalled, or injected into context |
+| **Excluded from Pool** | Capabilities excluded from the Capability Pool; in the left pane of the UI, click the plus sign to put them back |
+| **Resident** | Subset of capabilities directly available at startup; can only be selected from the pool; non-resident capabilities must be recalled via `meta_search` |
+| **`meta_search`** | Recall tool: `names` regex exact channel (tools only) + `keywords` semantic channel (tools and Skills, Mode B only); it is itself a normal in-pool capability and can be excluded or made non-resident |
+| **`skill` (shadow)** | Skill loading tool after takeover: validates the pool and blacklist before rendering the body; coordinates with official catalog injection to avoid duplicate injection |
+| **Payload-level deduplication** | Before recall returns, compare same-type payloads verbatim with the current context and remove only exact matches; tool index ≠ tool schema, and they are not deduplicated against each other |
+| **Tool index / Skill catalog** | Name + summary lists injected in Mode A: the index lists only non-resident tools, and the catalog lists all in-pool Skills; Mode B injects neither |
+| **Role blacklist** | Capability exclusion lists for Router / Worker respectively, with the highest priority; configurable only when Personal Agent is detected |
+| **Session role binding** | Fallback for manually assigning a role to a session; the binding is dormant when Personal Agent has already made a determination |
+| **Vector retrieval** | Semantic recall subsystem for Mode B: model download and verification, WordPiece tokenization, CLS pooling, cosine top-K, vectors incrementally cached by summary hash |
 
 ---
 
-## Plugin Tools & Built-in Skill
+## Plugin Tools and Built-in Skills
 
-| Name | Kind | Purpose |
+| Name | Type | Purpose |
 |---|---|---|
-| **`meta_search`** | Tool | Recalls pooled capabilities: `names` (regex name group, tools only, always available), `keywords` (semantic, mode B only), `limit` (default 20, max 50); returns full tool schemas and Skill index entries |
-| **`skill`** | Tool (shadow) | Loads a Skill's body by name; validates the capability pool and role blacklist before loading |
-| **`capability-creator`** | Built-in Skill | Guides the Agent through creating custom tools / custom Skills / configuring MCP: decide the type, write the files, check name collisions—effective immediately on write |
+| **`meta_search`** | Tool | Recall in-pool capabilities: `names` (regex name groups, tools only, always available), `keywords` (semantic, Mode B only), `limit` (default 20, max 50); returns full tool schemas and Skill index entries |
+| **`skill`** | Tool (shadow) | Load a Skill body by name; validates the capability pool and role blacklist before loading |
+| **`skill-creator`** | Built-in Skill | Guides the Agent to create custom Skills; hot-effective on write |
+| **`tool-creator`** | Built-in Skill | Guides the Agent to create custom tools; hot-effective on write |
 
-> Recalled tools become callable from the **next step**: the restriction rebuild takes effect on the next step, so calling one within the same step using the returned schema will fail. This is the inherent latency of incremental supply.
+> Recalled tools become callable from the **next step**: restriction rebuild takes effect at the next step; calling directly within the same step according to the returned schema will fail. This is the inherent delay of incremental provisioning.
 
 ---
 
-## Installation (Windows)
+## 📦 Installation
 
-> **Version compatibility**: this plugin targets the **DeepSeek Harness `0.2.2-rc` line** (developed and verified against `0.2.2-rc.3`, Desktop profile `desktop`). Install or upgrade the host first (**fully stop the dsh process** in an external terminal before upgrading):
+> **Version compatibility**: This plugin is compatible with **DeepSeek Harness `0.2.2-rc.5` and above**. Please install or upgrade the host first (before upgrading, **fully stop the dsh process** in an external terminal):
 >
-> ```bash
-> npm install -g @deepseek-ai/dsh@0.2.2-rc.3
-> ```
-> Tip: you can paste the following steps directly to an AI assistant such as Claude Codex to install the plugin. When using the web profile, replace `desktop` with `web` in the commands below.
+> Tip: You can copy the following paragraphs directly to an AI assistant such as Claude Codex to install this plugin. When using the web profile, replace `desktop` with `web` in the commands below.
 
-1. **Locate in File Explorer**: `%USERPROFILE%\.dsh\profiles\desktop\pnpm-workspace.yaml`, and add:
+### Option 1: Install everything with one command (recommended)
 
-```yaml
-allowBuilds:
-  onnxruntime-node: true
+We provide an aggregation package that includes all the following features:
+- `dsh-capability-manager` (Capability Manager)
+- `dsh-personal-agent` (Personal Assistant)
+- `dsh-run-python` (Python Workbench)
+
+Run the following command in a terminal to install and configure all plugins at once:
+
+**Desktop** (recommended: click the plugin page and enter the package name to install):
+
 ```
-
-2. **Run the plugin install command**:
-
+dsh-gzx-plugin
+```
+or
 ```bash
-dsh plugin --profile desktop add "github:GZX2211/dsh-capability-manager#master"
+dsh plugin --profile desktop add dsh-gzx-plugin
 ```
 
-3. **On Desktop you can also add and install from the Plugins page in the top-left corner**:
+---
 
-```
-github:GZX2211/dsh-capability-manager#master
-```
+### Option 2: Install individually as needed
 
-4. **Verify the mount** (optional):
-
+[Capability Manager](https://github.com/GZX2211/dsh-capability-manager "If you need meta_search's on-demand tool recall, take a look")
 ```bash
-dsh --profile desktop --dump-config | findstr "capability-manager"
+dsh plugin add dsh-capability-manager
 ```
 
-5. **Restart** dsh or the Desktop app. Open the manager: click the **"Capabilities" entry in the official left sidebar** (below the "Plugins" button) for the full management UI.
+[Personal Assistant](https://github.com/GZX2211/dsh-personal-agent "If you need an assistant that can proactively get work done on its own, take a look (usually used together with the other two plugins, otherwise some capabilities will be missing)")
+```bash
+dsh plugin add dsh-personal-agent
+```
+
+[Python Workbench](https://github.com/GZX2211/dsh-run-python "If you need a tool that can directly execute Python code and maintain kernel state cell by cell, take a look")
+```bash
+dsh plugin add dsh-run-python
+```
 
 ### Installation Troubleshooting
 
-**`Host key verification failed`**
+**pnpm interception prompt: declares build scripts, requires `allowBuilds`** (common)
 
-Run in **PowerShell** or **CMD**:
-
-```bash
-git config --global url."https://github.com/".insteadOf "git@github.com:"
-```
-
-**pnpm blocks the install: build scripts declared, `allowBuilds` required** (common)
-
-Locate in File Explorer: `%USERPROFILE%\.dsh\profiles\desktop\pnpm-workspace.yaml`, add the package named in the error to the `allowBuilds` list, save, and reinstall.
+File manager location: `%USERPROFILE%\.dsh\profiles\desktop\pnpm-workspace.yaml`; add the package names given in the error to the `allowBuilds` list, save, and reinstall.
 
 ### Uninstall
 
@@ -187,30 +169,30 @@ Locate in File Explorer: `%USERPROFILE%\.dsh\profiles\desktop\pnpm-workspace.yam
 dsh plugin --profile desktop remove dsh-capability-manager
 ```
 
-> If you no longer use the plugin, you may also clean up the state directory: `~/.dsh/state/capability-manager/` (MCP configuration does not live there—it is stored in the official configuration, and uninstalling the plugin does not affect configured servers).
+> If you no longer use it, you can also clean up the state directory: `~/.dsh/state/capability-manager/` (MCP configuration is not included; it is stored in the official configuration, and uninstalling the plugin does not affect configured servers).
 
 ## Quick Start
 
-- Understand the architecture? See the [Architecture document](docs/architecture.en.md)
+- Want to understand the project architecture? See [Architecture](docs/architecture.en.md)
 - Want to contribute? See [Contributing](docs/CONTRIBUTING.en.md)
-- Learn how to use the plugin? See the [User Guide](docs/USER_GUIDE.en.md)
-- Secondary development? See the [development rules](AGENTS.md)
-- Installation and project overview? This file, [README.en.md](README.en.md)
+- Want to learn how to use the plugin? See [User Guide](docs/USER_GUIDE.en.md)
+- Want to do secondary development? See [Development Guidelines](AGENTS.en.md)
+- How to install and get a project overview? This file [README.en.md](README.en.md)
 
 ---
 
 ## Data Storage
 
-The plugin's private state lives in `<DSH_HOME>/state/capability-manager/` (falling back to `~/.dsh/state/capability-manager/` when `DSH_HOME` is absent):
+Plugin private state is located at `<DSH_HOME>/state/capability-manager/` (falls back to `~/.dsh/state/capability-manager/` when `DSH_HOME` is not set):
 
 ```
-config.json                 # pool / residency / blacklists / vector search / role bindings (atomic writes, self-healing reads)
+config.json                 # pool / resident / blacklist / vector retrieval / role binding (atomic write, self-healing reads)
 tools/<name>/               # custom tools: meta.json (declarative shell/http) + optional impl.mjs (code)
 skills/<name>/              # custom Skills: SKILL.md + references/
-models/bge-small-zh-v1.5/   # vector model weights, tokenizer, manifest, and the vector cache vectors.json
+models/bge-small-zh-v1.5/   # vector model weights, tokenizer, manifest and vector cache vectors.json
 ```
 
-> MCP configuration is **not** in the state directory: it is written into the profile configuration through the official `config-editor`, the same source as the official Settings. Session recall records are not persisted; they are rebuilt from the session log after a restart.
+> MCP configuration is **not** in the state directory: it is written to the profile configuration via the official `config-editor`, sharing the same source as the official Settings. Session recall records are not persisted; they are rebuilt from the session log after restart.
 
 ---
 
@@ -227,13 +209,13 @@ dsh plugin --profile desktop add "link:$PWD"
 Common commands:
 
 ```bash
-pnpm typecheck      # type checking
-pnpm test           # unit + integration tests (vitest)
-pnpm build          # build Host + Client (tsdown)
-pnpm check          # typecheck + test + build
+pnpm typecheck      # Type checking
+pnpm test           # Unit + integration tests (vitest)
+pnpm build          # Build Host + Client (tsdown)
+pnpm check          # Type checking + tests + build
 ```
 
-> Client changes require a rebuild and a hard browser refresh; Host changes require restarting dsh or the Desktop app. Layered development rules live in the root `AGENTS.md` and the ones under each `src/` and `tests/` subdirectory.
+> After modifying the Client, rebuild and hard-refresh the browser; after modifying the Host, restart dsh or the desktop app. For layered development guidelines, see `AGENTS.md` in the root directory and in each `src/` and `tests/` subdirectory.
 
 ---
 
@@ -241,16 +223,16 @@ pnpm check          # typecheck + test + build
 
 | Item | Description |
 |---|---|
-| Tightening is delayed for in-flight sessions | The host's `addition-only` protocol sends no tool-removal notices; the UI states this honestly—start a new session when needed |
-| Recall has a one-step latency | A tool recalled within a step can only be executed from the next step |
-| Tools registered on the agent's own scope escape the pool | A semantic boundary of `restrict`; such tools are session-specific |
-| Custom code tools have no sandbox | They run in the host process; prefer declarative tools and review code tools yourself |
-| Long-lived sessions accumulate recall records | The recall set is rebuilt from the session log without distinguishing why tools were added; new sessions always behave correctly |
+| Tightening configuration is visible to ongoing sessions with delay | The host's `addition-only` protocol does not send tool removal notifications; the UI warns truthfully, and a new session can be created if necessary |
+| Recall has a one-step delay | Tools recalled in the same step can only be executed in the next step |
+| Tools registered in the agent's own scope are not governed by the pool | Semantic boundary of `restrict`; such tools are session-specific |
+| Custom code tools have no sandbox | Executed in the same process as the host; prefer declarative tools, and review code tools yourself |
+| The recall set of long-running sessions grows with history | The recall set is rebuilt from the session log without distinguishing why items were added; new sessions always behave correctly |
 
-Planned: Skill version control.
+Future plans: Skill version control.
 
 ---
 
 ## License
 
-MIT © GZX2211. Issues and PRs are welcome.
+MIT © GZX2211. Issues / PRs are welcome.

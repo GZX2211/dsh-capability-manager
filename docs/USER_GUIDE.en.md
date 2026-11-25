@@ -10,8 +10,7 @@ for basic concepts and installation, see the [README](../README.en.md).
 ## 1. The Main View
 
 <p align="center">
-  <!-- Image placeholder: capability manager overview (header / tabs / filters / transfer panes, annotated) -->
-  <img src="" width="100%" />
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-capability-manager/main/assets/工具页穿梭框.png" width="100%" />
 </p>
 
 > Click the "Capabilities" entry in the official left sidebar (below the "Plugins" button) to open the manager. All capability governance happens on this single page.
@@ -24,28 +23,12 @@ From top to bottom:
 | Tabs | **Tools** / **Skills** / **MCP** / **Settings** |
 | Toolbar | Source filter pills (All / Official / Custom / MCP) + search box (substring match on name and purpose, filters as you type) |
 | Transfer panes | Left: **Excluded**; right: **Pool**; the divider between them is draggable (also ← / → to nudge, Home / End to the edges, double-click to reset) |
-| Warning bar | Below the header; lists configurations that would break the recall chain, click to expand details |
 
 Extra: what is inside the help button (?)?
 - It explains the transfer panes, the resident switch, the recall mechanism, and whether you are in mode A or mode B.
 - It states two easily misunderstood rules explicitly: **loading a skill with `/name` is not restricted by the pool**; **recalled results become callable from the next step on**.
 
 ## 2. Managing the Pool and Residency
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <!-- Image placeholder: Tools tab operations (plus / minus / resident switch / open folder) -->
-      <img src="" width="100%" />
-    </td>
-    <td width="50%" valign="top">
-      <!-- Image placeholder: expanded warning bar details -->
-      <img src="" width="100%" />
-    </td>
-  </tr>
-</table>
-
-> The Tools and Skills tabs share the same transfer panes—the most frequently used management surface of the plugin. The Skills tab has no MCP filter (MCP servers provide tools only, not skills).
 
 Each capability has exactly two configurable states:
 
@@ -100,11 +83,6 @@ A few behaviors worth knowing:
 - **Dedupe is payload-level**: only payloads byte-identical to the current context are dropped. An empty return is not a failure—the target capability may already be in context.
 - **A tool recalled within a step cannot execute in that same step**; it becomes callable from the next step, and the return value says so.
 
-<p align="center">
-  <!-- Image placeholder: a meta_search call and its return inside a session -->
-  <img src="" width="100%" />
-</p>
-
 ## 4. Vector Search (Switching Mode A / B)
 
 In **Settings → Vector search**:
@@ -116,27 +94,13 @@ In **Settings → Vector search**:
 
 > The mode is a global switch affecting all sessions. Model files and the vector cache live under `models/` in the plugin state directory; deleting them causes a re-download on the next enable.
 
-<p align="center">
-  <!-- Image placeholder: Settings vector-search section (switch / status / failure reason) -->
-  <img src="" width="100%" />
-</p>
-
 ## 5. MCP Connection Management
 
 The **MCP** tab manages MCP server connections. The configuration here is **the same one** the Agent and the official Settings use: a server added on either side appears in the same list with the same name, transport, and state.
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <!-- Image placeholder: MCP list (state dots / tags / enable switches) -->
-      <img src="" width="100%" />
-    </td>
-    <td width="50%" valign="top">
-      <!-- Image placeholder: Configure MCP dialog (manual form / mcp.json import) -->
-      <img src="" width="100%" />
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GZX2211/dsh-capability-manager/main/assets/新增mcp.png" width="60%" />
+</p>
 
 ### Adding a server
 
@@ -147,50 +111,23 @@ Click **Configure MCP** in the top-right; two views:
 
 Saving **takes effect immediately, no restart needed**. Once connected, the server's tools enter the capability pool by default; manage them back on the Tools tab (source filter: MCP).
 
-### Everyday operations
-
-| Operation | Description |
-|---|---|
-| Enable switch | Off: the entry stays, the connection unmounts (state "Disabled"); on: mounts and connects immediately, the state dot reflects the result live |
-| State dot | Green = connected; in progress = connecting / reconnecting; yellow = missing credentials; red = connection failed (reason available); gray = disabled / not connected |
-| Edit | The in-row edit button opens the dialog pre-filled; **the name cannot change after saving** (renaming means delete and recreate) |
-| Delete | Only at the bottom of the edit dialog, with a click-again confirmation; deleting unmounts the connection and its tools |
-| Filters | All / Connected / Not connected; search matches the name and target summary |
-
-Boundaries:
-
-- Servers registered by a plugin are tagged "registered by a plugin"—read-only, not editable or deletable here.
-- When the profile does not mount the official MCP manager, the tab shows the reason and how to enable it instead of faking an empty list; when the configuration editor is unavailable, it degrades to read-only.
-- `${credential:…}` templates in environment / headers are stored and echoed verbatim; the UI never claims to read secret values.
-- There is a brief tool gap while a server is rebuilt—a known limitation of the official mechanism.
-
 ## 6. Creating Custom Capabilities
 
 The **Create capability** split button in the header offers two ways:
 
 ### Let the Agent create it
 
-Clicking it opens a new session pre-filled with "Help me create a skill / tool / MCP: "—continue typing your request after the colon. The built-in `capability-creator` Skill guides the Agent to:
+Clicking it opens a new session pre-filled with "Help me create a skill / tool / MCP: "—continue typing your request after the colon. The built-in Skill guides the Agent to:
 
-1. Decide the type: run commands / read-write files / call HTTP → a custom tool; reusable task instructions → a custom Skill; connect an existing MCP endpoint → guided MCP configuration.
-2. Confirm the name is free via `meta_search`.
-3. Write files into the state directory: tools prefer the **declarative** form (`meta.json` describing shell / http—auditable, no arbitrary code); only complex logic gets an `impl.mjs`; Skills get a `SKILL.md`.
-4. Writes are watched and registered—**no restart needed**; new capabilities enter the pool by default, are not resident by default, and can be recalled by `meta_search` right away.
-
-> Security note: custom code tools run in the host process with no sandbox. Always review an Agent-written `impl.mjs` before enabling it, and never write access credentials into capability files.
+> Security note: custom code tools run in the host process with no sandbox..
 
 ### Create a skill manually
 
 Click **Create a skill manually**: you are taken to the Skills tab, and a new entry appears pinned at the top of the Excluded pane (default name `my-skill`, auto-numbered on collision) with a "Custom" tag. Click its **Open folder** button, edit the `SKILL.md` (the skeleton already contains frontmatter and filling guidance) and `references/`, then click the plus to move it into the pool and enable it.
 
-<p align="center">
-  <!-- Image placeholder: the create-capability menu and the new custom entry -->
-  <img src="" width="100%" />
-</p>
-
 ## 7. Role Blacklists & Session Roles (Personal Agent required)
 
-**Only when the Personal Agent plugin (`ctx.paRoles` service) is detected** do the "Role blacklists" and "Session roles" sections appear in Settings; otherwise an explanation is shown—never a panel you can configure but that does nothing.
+**Only when the Personal Agent plugin (`ctx.paRoles` service) is detected** do the "Role blacklists" and "Session roles" sections appear in Setting.
 
 ### Role blacklists
 
@@ -201,27 +138,12 @@ Two side-by-side panels for Router and Worker, each with a searchable list:
 - Out-of-pool capabilities are still listed and tagged "Excluded": the blacklist and the pool are independent—configure first, pool later is a valid workflow.
 - **A blacklist outranks everything**: it excludes pooled and resident capabilities alike; the two roles are independent, and sessions with an unknown role are unaffected by either.
 
-### Session roles
-
-Each active session shows its **effective role** and **source** (from the Personal Agent / from a manual binding / not determined yet):
-
-- The manual binding has three states: **Automatic / Router / Worker**. "Automatic" writes no binding and hands the decision back to the Personal Agent.
-- A manual binding is a **fallback**, not an override: when the Personal Agent has decided a role, the binding is dormant and does not take effect—the UI marks it.
-
-<p align="center">
-  <!-- Image placeholder: Settings role-blacklist panels and the session-role list -->
-  <img src="" width="100%" />
-</p>
-
 ## 8. Common Questions
 
 - **The model says it has no tools / recall returns nothing**: check that `meta_search` is resident and in the pool (see the warning bar); confirm the target capability is pooled and not excluded by the current role's blacklist.
-- **A just-recalled tool errors when called**: recalled tools become callable from the next step; executing within the same step fails. Let the model continue to the next step.
-- **I tightened the configuration but an in-flight session did not change**: the host protocol sends no tool-removal notices, so tightening is delayed for in-flight sessions; start a new session when needed. Additions and loosening are visible immediately.
 - **Do tools survive a restart?** Yes. Previously recalled tools are rebuilt from the session log—no re-recall needed.
 - **Why can an out-of-pool skill still load via `/name`?** Explicit use outranks governance—this is by design; the pool only constrains the model's autonomous calls, the catalog, and recall.
 - **An MCP server keeps showing "Connection failed"**: read the failure reason on the state dot; verify the launch command / endpoint and that dependencies are installed; when credentials are missing, configure them via the official credential templates.
-- **A custom tool did not appear after writing it**: check the `meta.json` fields and that the directory name matches the spec (invalid entries are skipped with a specific reason in the log); names must not contain `__` (that is the MCP namespace).
 - **Enabling vector search failed**: staying off is the intended degradation; fix the network or disk issue shown in the UI and retry—exact recall is always available.
 
 If you hit a problem you cannot solve, note the situation and reproduce it once more (if possible), then raise it in an issue; if you are good at locating problems and fixing code, a PR is welcome too—I will handle it promptly.
