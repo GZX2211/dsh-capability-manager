@@ -13,7 +13,6 @@ import type { CapabilityEntry, CapabilityId } from '../../shared/capability.ts'
 import type { SessionRoleName } from '../../shared/config.ts'
 import type { Dict, Translate } from '../i18n.ts'
 import { bindingPatch, blacklistOf, blacklistRows, sessionRoleRows, type BindingChoice } from '../lib/roles.ts'
-import { useSyncedScroll } from '../hooks/useSyncedScroll.ts'
 import { KindFilter, type KindFilterValue } from '../components/KindFilter.tsx'
 import { RoleBlacklistPane } from '../components/RoleBlacklistPane.tsx'
 import { SessionRoleList } from '../components/SessionRoleList.tsx'
@@ -88,10 +87,6 @@ export function Settings({ snapshot, capabilities, saving, onMutate, onToggleEmb
     [capabilities, config, kind, query],
   )
   const sessions = useMemo(() => sessionRoleRows(snapshot.sessions, config), [snapshot.sessions, config])
-  // Router / Worker 两侧同步滚动：并排对比时同一屏看到的是同一批能力。
-  const syncedScroll = useSyncedScroll()
-  const routerScrollRef = syncedScroll.refOf(0)
-  const workerScrollRef = syncedScroll.refOf(1)
 
   const toggleBlacklist = useCallback(
     (role: SessionRoleName, id: CapabilityId, next: boolean): void => {
@@ -158,8 +153,6 @@ export function Settings({ snapshot, capabilities, saving, onMutate, onToggleEmb
                     excludedIds={excludedIds}
                     disabled={saving}
                     ready
-                    listRef={routerScrollRef}
-                    onListScroll={() => syncedScroll.onScroll(0)}
                     onToggle={toggleBlacklist}
                     onClear={clearBlacklist}
                     t={t}
@@ -174,8 +167,6 @@ export function Settings({ snapshot, capabilities, saving, onMutate, onToggleEmb
                     excludedIds={excludedIds}
                     disabled={saving}
                     ready
-                    listRef={workerScrollRef}
-                    onListScroll={() => syncedScroll.onScroll(1)}
                     onToggle={toggleBlacklist}
                     onClear={clearBlacklist}
                     t={t}

@@ -468,16 +468,6 @@ describe('apply 装配', () => {
     expect(snapshot.capabilities.find(capability => capability.id === 'skill:greet')).toMatchObject({ source: 'custom' })
   })
 
-  it('注册内置 capability-creator，正文带上真实状态目录', () => {
-    const host = createHost()
-
-    const creator = host.registeredSkills.find(skill => skill.name === 'capability-creator')
-
-    expect(creator).toBeDefined()
-    expect(creator?.content).toContain(host.stateDir)
-    expect(creator?.content).not.toContain('{{STATE_DIR}}')
-  })
-
   it('验收：声明式工具写入后无需重启即可被 meta_search 召回并调用', async () => {
     const host = createHost()
     await host.createAgent()

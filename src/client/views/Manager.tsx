@@ -7,18 +7,20 @@
 // 「哪些行在哪一侧」与「拖多宽」可以各自独立验证。
 
 import { Button, IconLoadingOutlineRegular, IconQuestionOutlineRegular, IconRefreshOutlineRegular, Input, IconSearchOutlineRegular, SegmentedTabs, Tooltip, type SegmentedTab } from '@deepseek-ai/dsh-client-ui-primitives'
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { CapabilityKind } from '../../shared/capability.ts'
 import { ApiError } from '../lib/http.ts'
 import { localizeCapabilities } from '../lib/capability-text.ts'
 import { filterCapabilities, type SourceFilterValue } from '../lib/filter.ts'
 import { countByPool, partitionByPool, sortPinnedFirst, sortResidentFirst } from '../lib/transfer.ts'
+import { describeWarnings, unseenLines } from '../lib/warnings.ts'
 import { useSnapshot } from '../hooks/useSnapshot.ts'
 import { useSplitRatio } from '../hooks/useSplitRatio.ts'
+import { useToast } from '../hooks/useToast.ts'
 import { HelpDialog } from '../components/HelpDialog.tsx'
+import { NoticeArea } from '../components/NoticeArea.tsx'
 import { SourceFilter } from '../components/SourceFilter.tsx'
 import { TransferPane } from '../components/TransferPane.tsx'
-import { WarningBar } from '../components/WarningBar.tsx'
 import { CreateCapabilityMenu } from '../components/CreateCapabilityMenu.tsx'
 import { Settings } from './Settings.tsx'
 import { Mcp } from './Mcp.tsx'
@@ -60,9 +62,11 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
   const [source, setSource] = useState<SourceFilterValue>('all')
   const [query, setQuery] = useState('')
   const [helpOpen, setHelpOpen] = useState(false)
-  const [createFailed, setCreateFailed] = useState(false)
   /** 刚创建的能力：第一次出现时置顶，否则会按字母序沉进排出池深处。 */
   const [createdId, setCreatedId] = useState<string | undefined>(undefined)
+  const toast = useToast()
+  /** 只对新出现的警告弹一次 Toast；同一条在后续刷新里不再重复打扰。 */
+  const announced = useRef<Set<string>>(new Set())
 
   const describe = useCallback(
     (error: unknown): string => {
@@ -84,6 +88,27 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
   const snapshot = useSnapshot(describe)
   const split = useSplitRatio()
   const capabilityKind: CapabilityKind = tab === 'tools' ? 'tool' : 'skill'
+
+  const warningLines = useMemo(
+    () => describeWarnings(snapshot.snapshot?.warnings ?? [], t),
+    [snapshot.snapshot?.warnings, t],
+  )
+
+  // 警告初次出现时弹一次 Toast，之后内容由感叹号图标的悬浮提示承载。
+  useEffect(() => {
+    const fresh = unseenLines(warningLines, announced.current)
+    if (fresh.length === 0) return
+    for (const line of fresh) announced.current.add(line)
+    toast.show(fresh.join('\n'))
+  }, [warningLines, toast.show])
+
+  // 操作反馈没有常驻内容：每次出现都作为轻提示显示，由计时收起。
+  useEffect(() => {
+    if (snapshot.notice !== undefined) toast.show(snapshot.notice)
+  }, [snapshot.notice, toast.show])
+  useEffect(() => {
+    if (snapshot.writeError !== undefined) toast.show(snapshot.writeError)
+  }, [snapshot.writeError, toast.show])
 
   // 从有 MCP 筛选的页面切到 Skill 页时，「MCP」这个筛选在这个页面不存在。
   useEffect(() => {
@@ -185,13 +210,16 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
           <span className="cm-subtitle">{t('pageSubtitle')}</span>
         </div>
         <div className="cm-header-actions">
+          <NoticeArea message={toast.text} lines={warningLines} t={t} />
           <Button variant="outline" size="sm" icon={<IconRefreshOutlineRegular />} onClick={snapshot.refresh}>
             {t('refresh')}
           </Button>
           <CreateCapabilityMenu
             disabled={snapshot.saving}
             t={t}
-            onCreateWithAgent={() => setCreateFailed(!onCreateWithAgent())}
+            onCreateWithAgent={() => {
+              if (!onCreateWithAgent()) toast.show(t('createUnavailable'))
+            }}
             onCreateSkill={() => { void createSkill() }}
           />
         </div>
@@ -206,12 +234,6 @@ export function Manager({ t, currentLanguage, onCreateWithAgent }: ManagerProps)
           label={t('pageTitle')}
         />
       </div>
-
-      {/* 提示条放在 tab 内容之上：设置页的写入失败与黑名单风险同样要出现在视野里。 */}
-      {snapshot.snapshot !== undefined ? <WarningBar warnings={snapshot.snapshot.warnings} t={t} /> : null}
-      {createFailed ? <p className="cm-notice">{t('createUnavailable')}</p> : null}
-      {snapshot.notice !== undefined ? <p className="cm-notice">{snapshot.notice}</p> : null}
-      {snapshot.writeError !== undefined ? <p className="cm-notice">{snapshot.writeError}</p> : null}
 
       {tab === 'settings' ? (
         <div className="cm-content">

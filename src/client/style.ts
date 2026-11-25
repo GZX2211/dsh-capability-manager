@@ -105,9 +105,10 @@ const CSS = `
 .cm-session-effective { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.95)); }
 .cm-session-hint { font-size: 12px; line-height: 18px; color: var(--dsw-alias-text-warning, #b45309); }
 .cm-session-choice { flex-shrink: 0; }
-.cm-warnings { display: flex; flex-direction: column; gap: 6px; margin: 0 20px 12px; }
-.cm-warning { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary, inherit); background: var(--dsw-alias-surface-raised, rgba(128,128,128,.08)); }
-.cm-warning-icon { flex-shrink: 0; margin-top: 2px; color: var(--dsw-alias-text-warning, #b45309); }
+/* 页头提示区：Toast 在左，永久提示收拢到右侧感叹号图标；两者无内容时不占位。 */
+.cm-notice-area { display: flex; align-items: center; gap: 8px; flex-shrink: 1; min-width: 0; }
+.cm-toast { max-width: 420px; white-space: pre-line; overflow-wrap: anywhere; font-size: 12px; line-height: 18px; color: var(--dsw-alias-text-warning, #b45309); }
+.cm-warning-hint { flex-shrink: 0; width: 28px; padding: 0; color: var(--dsw-alias-text-warning, #b45309); }
 .cm-help { display: flex; flex-direction: column; gap: 14px; font-size: 13px; line-height: 21px; }
 .cm-help-section { display: flex; flex-direction: column; gap: 2px; }
 .cm-help-term { font-weight: 600; color: var(--dsw-alias-label-primary, inherit); }
