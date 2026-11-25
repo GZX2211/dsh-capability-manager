@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { createSelfmadeToolDefinition } from './definition.ts'
 import { CODE_ENTRY_FILE } from './executors/code.ts'
+import { PYTHON_ENTRY_FILE } from './executors/python.ts'
 import { parseToolMeta, type SelfmadeToolMeta } from './meta.ts'
 
 /** 扫描结果：注册所需的最小事实。 */
@@ -69,7 +70,8 @@ export function scanSelfmadeTools(stateDir: string, log?: (message: string) => v
     }
 
     const hasImpl = existsSync(join(dir, CODE_ENTRY_FILE))
-    const parsed = parseToolMeta(raw, { dirName: dirent.name, hasImpl })
+    const hasPython = existsSync(join(dir, PYTHON_ENTRY_FILE))
+    const parsed = parseToolMeta(raw, { dirName: dirent.name, hasImpl, hasPython })
     if (!parsed.ok) {
       log?.(`自建工具 "${dirent.name}" 已跳过：${parsed.message}`)
       continue
@@ -79,7 +81,7 @@ export function scanSelfmadeTools(stateDir: string, log?: (message: string) => v
       name: parsed.meta.name,
       dir,
       meta: parsed.meta,
-      signature: signatureOf(metaText, parsed.meta.kind === 'code' ? implVersion(dir) : ''),
+      signature: signatureOf(metaText, entrySignature(dir, parsed.meta)),
     })
   }
   return tools
@@ -94,6 +96,8 @@ export interface SelfmadeToolsOptions {
   isTaken?: (name: string) => boolean
   /** 解析调用方会话的工作目录。 */
   workspaceOf?: (agent: unknown, signal: AbortSignal) => Promise<string | undefined>
+  /** 显式指定的 Python 解释器；缺省按内置顺序探测。 */
+  pythonPath?: string
   log?: (message: string) => void
   /** 是否监听文件变化；缺省为开启。 */
   watch?: boolean
@@ -158,6 +162,7 @@ export class SelfmadeTools {
         const definition = createSelfmadeToolDefinition(entry.meta, entry.dir, {
           stateDir: this.options.stateDir,
           ...this.options.workspaceOf === undefined ? {} : { workspaceOf: this.options.workspaceOf },
+          ...this.options.pythonPath === undefined ? {} : { pythonPath: this.options.pythonPath },
         })
         const release = this.options.register(definition)
         this.registered.set(entry.name, { signature: entry.signature, release })
@@ -251,15 +256,27 @@ export class SelfmadeTools {
   }
 }
 
-/** 签名 = meta 原文 + 代码入口版本；声明式工具不读 impl.mjs。 */
+/** 签名 = meta 原文 + 脚本入口版本；声明式工具没有入口文件，读作空串。 */
 function signatureOf(metaText: string, implSignature: string): string {
   return createHash('sha256').update(metaText).update('\u0000').update(implSignature).digest('hex')
 }
 
-/** 代码入口的版本用修改时间与大小表达：读全文算哈希是没必要的 IO。 */
-function implVersion(dir: string): string {
+/** 代码工具的入口：Python 用 main.py，Node 用 impl.mjs；声明式工具没有入口。 */
+function entryOf(meta: SelfmadeToolMeta): string | undefined {
+  if (meta.kind === 'code') return CODE_ENTRY_FILE
+  if (meta.kind === 'python') return meta.python?.entry ?? PYTHON_ENTRY_FILE
+  return undefined
+}
+
+function entrySignature(dir: string, meta: SelfmadeToolMeta): string {
+  const entry = entryOf(meta)
+  return entry === undefined ? '' : fileVersion(dir, entry)
+}
+
+/** 入口的版本用修改时间与大小表达：读全文算哈希是没必要的 IO。 */
+function fileVersion(dir: string, name: string): string {
   try {
-    const info = statSync(join(dir, CODE_ENTRY_FILE))
+    const info = statSync(join(dir, name))
     return `${String(info.mtimeMs)}-${String(info.size)}`
   } catch {
     return 'missing'

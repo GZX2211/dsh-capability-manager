@@ -10,8 +10,8 @@
 
 import { assertObjectJsonSchema, assertSupportedJsonSchema, JsonSchemaError } from '@deepseek-ai/dsh-tools'
 
-/** 三种执行形态：声明式 shell、声明式 http、代码文件。 */
-export type SelfmadeToolKind = 'code' | 'shell' | 'http'
+/** 四种执行形态：声明式 shell、声明式 http、Node 代码文件、Python 脚本。 */
+export type SelfmadeToolKind = 'code' | 'shell' | 'http' | 'python'
 
 export interface SelfmadeShellSpec {
   command: string
@@ -29,6 +29,12 @@ export interface SelfmadeHttpSpec {
   timeoutMs: number
 }
 
+/** Python 工具：入口文件名与执行预算。 */
+export interface SelfmadePythonSpec {
+  entry: string
+  timeoutMs: number
+}
+
 /** 一份通过校验的自建工具描述。 */
 export interface SelfmadeToolMeta {
   name: string
@@ -38,6 +44,7 @@ export interface SelfmadeToolMeta {
   kind: SelfmadeToolKind
   shell?: SelfmadeShellSpec
   http?: SelfmadeHttpSpec
+  python?: SelfmadePythonSpec
 }
 
 export type ToolMetaErrorCode =
@@ -59,6 +66,8 @@ export interface ParseToolMetaContext {
   dirName: string
   /** 同目录是否存在 impl.mjs；缺省 kind 时据此判定形态。 */
   hasImpl: boolean
+  /** 同目录是否存在 main.py；与 impl.mjs 同时存在时优先 Python。 */
+  hasPython?: boolean
 }
 
 /** 工具名与 Skill 名不共享命名空间，但仍沿用同一套可读性约束。 */
@@ -69,7 +78,7 @@ const DEFAULT_TIMEOUT_MS = 30_000
 const MAX_TIMEOUT_MS = 600_000
 
 const METHODS: readonly SelfmadeHttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-const KINDS: readonly SelfmadeToolKind[] = ['code', 'shell', 'http']
+const KINDS: readonly SelfmadeToolKind[] = ['code', 'shell', 'http', 'python']
 
 /**
  * 收窄一份 meta.json。
@@ -115,20 +124,26 @@ export function parseToolMeta(raw: unknown, context: ParseToolMetaContext): Tool
     if (!http.ok) return http
     return { ok: true, meta: { ...base, kind: 'http', http: http.value } }
   }
+  if (kind.value === 'python') {
+    const python = narrowPython(raw.python)
+    if (!python.ok) return python
+    return { ok: true, meta: { ...base, kind: 'python', python: python.value } }
+  }
   return { ok: true, meta: { ...base, kind: 'code' } }
 }
 
-/** 缺省 kind 的判定只依赖 impl.mjs 是否存在——这是「声明式优先」的落点。 */
+/** 缺省 kind 的判定只看目录里有什么：main.py 在前，其次 impl.mjs。 */
 function narrowKind(raw: unknown, context: ParseToolMetaContext): { ok: true; value: SelfmadeToolKind } | { ok: false; code: ToolMetaErrorCode; message: string } {
   if (raw === undefined) {
+    if (context.hasPython === true) return { ok: true, value: 'python' }
     if (context.hasImpl) return { ok: true, value: 'code' }
     return fail(
       'bad-kind',
-      '缺少 kind：声明式工具需要 kind 为 "shell" 或 "http"；代码工具需要同目录提供 impl.mjs',
+      '缺少 kind：声明式工具需要 kind 为 "shell" 或 "http"；代码工具需要在同目录提供 main.py（Python）或 impl.mjs（Node）',
     )
   }
   if (typeof raw !== 'string' || !KINDS.includes(raw as SelfmadeToolKind)) {
-    return fail('bad-kind', `kind 只能是 code / shell / http，收到 ${JSON.stringify(raw)}`)
+    return fail('bad-kind', `kind 只能是 code / shell / http / python，收到 ${JSON.stringify(raw)}`)
   }
   return { ok: true, value: raw as SelfmadeToolKind }
 }
@@ -218,6 +233,23 @@ function narrowHttp(raw: unknown): { ok: true; value: SelfmadeHttpSpec } | { ok:
   const timeout = narrowTimeout(raw.timeoutMs)
   if (!timeout.ok) return timeout
   return { ok: true, value: { url, method, headers, timeoutMs: timeout.value } }
+}
+
+const PYTHON_ENTRY = /^[A-Za-z0-9][A-Za-z0-9_.-]*\.py$/
+
+/** Python 形态：入口必须是目录内的单个 .py 文件，不能借名字跳出去。 */
+function narrowPython(raw: unknown): { ok: true; value: SelfmadePythonSpec } | { ok: false; code: ToolMetaErrorCode; message: string } {
+  if (raw === undefined) return { ok: true, value: { entry: 'main.py', timeoutMs: DEFAULT_TIMEOUT_MS } }
+  if (!isRecord(raw)) return fail('bad-executor', 'python 必须是对象，例如 { "entry": "main.py" }')
+
+  const entry = raw.entry === undefined ? 'main.py' : typeof raw.entry === 'string' ? raw.entry.trim() : ''
+  if (entry.length === 0 || !PYTHON_ENTRY.test(entry) || entry.includes('..')) {
+    return fail('bad-executor', `python.entry 必须是工具目录内的 .py 文件名（如 main.py），收到 ${JSON.stringify(raw.entry)}`)
+  }
+
+  const timeout = narrowTimeout(raw.timeoutMs)
+  if (!timeout.ok) return timeout
+  return { ok: true, value: { entry, timeoutMs: timeout.value } }
 }
 
 /** 超时缺省 30s；越界与小数一律视为作者错误，而不是悄悄夹取。 */

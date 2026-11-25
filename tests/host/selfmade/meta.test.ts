@@ -46,11 +46,36 @@ describe('meta.json 收窄', () => {
   })
 
   it('未知 kind 被拒绝', () => {
-    const result = parseToolMeta({ ...BASE, kind: 'python' }, context)
+    const result = parseToolMeta({ ...BASE, kind: 'docker' }, context)
 
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.message).toContain('python')
+    expect(result.message).toContain('docker')
+  })
+
+  it('kind 缺省时优先按 main.py 判定为 Python 工具', () => {
+    const result = parseToolMeta(BASE, { dirName: 'greet', hasImpl: true, hasPython: true })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.meta.kind).toBe('python')
+    expect(result.meta.python).toEqual({ entry: 'main.py', timeoutMs: 30000 })
+  })
+
+  it('Python 形态的入口与超时可覆盖，且入口必须留在工具目录内', () => {
+    const result = parseToolMeta(
+      { ...BASE, kind: 'python', python: { entry: 'run.py', timeoutMs: 5000 } },
+      context,
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.meta.python).toEqual({ entry: 'run.py', timeoutMs: 5000 })
+
+    for (const entry of ['../evil.py', 'sub/x.py', 'main.js', '', '..']) {
+      const bad = parseToolMeta({ ...BASE, kind: 'python', python: { entry } }, context)
+      expect(bad.ok).toBe(false)
+    }
   })
 
   it('目录名与 name 不一致时拒绝，避免两个名字各说各话', () => {

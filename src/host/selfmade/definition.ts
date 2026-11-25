@@ -6,6 +6,7 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { runCodeTool } from './executors/code.ts'
 import { runHttpTool } from './executors/http.ts'
+import { runPythonTool } from './executors/python.ts'
 import { runShellTool } from './executors/shell.ts'
 import type { SelfmadeToolMeta } from './meta.ts'
 
@@ -14,6 +15,8 @@ export interface SelfmadeToolRuntime {
   stateDir: string
   /** 解析调用方会话的工作目录；失败时应由实现降级为 undefined。 */
   workspaceOf?: (agent: unknown, signal: AbortSignal) => Promise<string | undefined>
+  /** 显式指定的 Python 解释器；缺省时按内置顺序探测。 */
+  pythonPath?: string
 }
 
 /**
@@ -29,8 +32,14 @@ export function createSelfmadeToolDefinition(
   dir: string,
   runtime: SelfmadeToolRuntime,
 ): ToolDefinition {
-  // 声明式工具的超时是作者声明的执行预算；代码工具的合作式超时由宿主策略决定。
-  const timeoutMs = meta.kind === 'shell' ? meta.shell?.timeoutMs : meta.kind === 'http' ? meta.http?.timeoutMs : undefined
+  // 声明式与 Python 工具的超时是作者声明的执行预算；Node 代码工具的合作式超时由宿主策略决定。
+  const timeoutMs = meta.kind === 'shell'
+    ? meta.shell?.timeoutMs
+    : meta.kind === 'http'
+      ? meta.http?.timeoutMs
+      : meta.kind === 'python'
+        ? meta.python?.timeoutMs
+        : undefined
 
   return {
     name: meta.name,
@@ -59,6 +68,17 @@ export function createSelfmadeToolDefinition(
           signal: context.signal,
           stateDir: runtime.stateDir,
           ...workspace === undefined ? {} : { workspace },
+        })
+      }
+      if (meta.kind === 'python') {
+        const workspace = await resolveWorkspace(runtime, context.agent, context.signal)
+        return await runPythonTool(dir, args, {
+          signal: context.signal,
+          timeoutMs: meta.python?.timeoutMs ?? 30_000,
+          stateDir: runtime.stateDir,
+          entry: meta.python?.entry,
+          ...workspace === undefined ? {} : { workspace },
+          ...runtime.pythonPath === undefined ? {} : { pythonPath: runtime.pythonPath },
         })
       }
       throw new Error(`自建工具 "${meta.name}" 缺少执行描述：kind 为 ${meta.kind} 但没有对应配置`)

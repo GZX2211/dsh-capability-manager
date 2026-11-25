@@ -112,6 +112,23 @@ describe('扫描自建工具目录', () => {
 
     expect(scanSelfmadeTools(root)[0]?.signature).not.toBe(first)
   })
+
+  it('同目录有 main.py 时判为 Python 工具，且入口变化会让签名变化', () => {
+    const root = stateDir()
+    const meta = { name: 'py', description: 'd', parameters: { type: 'object', properties: {} } }
+    const dir = join(root, 'tools', 'py')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'meta.json'), JSON.stringify(meta), 'utf8')
+    writeFileSync(join(dir, 'main.py'), 'print("{}")', 'utf8')
+
+    const first = scanSelfmadeTools(root)[0]
+    expect(first?.meta.kind).toBe('python')
+    expect(first?.meta.python).toEqual({ entry: 'main.py', timeoutMs: 30000 })
+
+    writeFileSync(join(dir, 'main.py'), 'print({"a": 1})', 'utf8')
+
+    expect(scanSelfmadeTools(root)[0]?.signature).not.toBe(first?.signature)
+  })
 })
 
 describe('自建工具注册表', () => {

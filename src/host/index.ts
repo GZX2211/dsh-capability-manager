@@ -84,6 +84,8 @@ export interface Config {
   stateDir?: string
   /** 向量检索的注入点。 */
   embedding?: EmbeddingOverrides
+  /** Python 工具使用的解释器绝对路径；缺省按 DSH 运行时、PATH 顺序探测。 */
+  pythonPath?: string
 }
 
 export function apply(ctx: HostContext, config?: Config): void {
@@ -228,6 +230,7 @@ export function apply(ctx: HostContext, config?: Config): void {
     register: definition => ctx.tools.register(definition),
     isTaken: toolName => ctx.tools.get(toolName) !== undefined,
     workspaceOf: cwdOf,
+    ...config?.pythonPath === undefined ? {} : { pythonPath: config.pythonPath },
     log,
   })
   guard(log, 'start the self-made tool registry', () => {

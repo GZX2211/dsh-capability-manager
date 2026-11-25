@@ -58,6 +58,16 @@ describe('自建工具定义', () => {
     expect(definition.timeoutMs).toBeUndefined()
   })
 
+  it('Python 工具把作者声明的执行预算投影给宿主', () => {
+    const definition = createSelfmadeToolDefinition(
+      { ...BASE, kind: 'python', python: { entry: 'main.py', timeoutMs: 8000 } },
+      '/tmp/x',
+      { stateDir: '/tmp/state' },
+    )
+
+    expect(definition.timeoutMs).toBe(8000)
+  })
+
   it('shell 工具执行后把退出码与输出交给调用方', async () => {
     const definition = createSelfmadeToolDefinition(
       {
