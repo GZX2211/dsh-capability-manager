@@ -123,7 +123,7 @@ Out-of-the-box state: all capabilities are in the pool, only the two meta capabi
 
 We provide an aggregation package that includes all the following features:
 - `dsh-capability-manager` (Capability Manager)
-- `dsh-personal-agent` (Personal Assistant)
+- `dsh-gzx-agent` (Personal Assistant)
 - `dsh-run-python` (Python Workbench)
 
 Run the following command in a terminal to install and configure all plugins at once:
@@ -149,7 +149,7 @@ dsh plugin add dsh-capability-manager
 
 [Personal Assistant](https://github.com/GZX2211/dsh-personal-agent "If you need an assistant that can proactively get work done on its own, take a look (usually used together with the other two plugins, otherwise some capabilities will be missing)")
 ```bash
-dsh plugin add dsh-personal-agent
+dsh plugin add dsh-gzx-agent
 ```
 
 [Python Workbench](https://github.com/GZX2211/dsh-run-python "If you need a tool that can directly execute Python code and maintain kernel state cell by cell, take a look")
@@ -161,7 +161,11 @@ dsh plugin add dsh-run-python
 
 **pnpm interception prompt: declares build scripts, requires `allowBuilds`** (common)
 
-File manager location: `%USERPROFILE%\.dsh\profiles\desktop\pnpm-workspace.yaml`; add the package names given in the error to the `allowBuilds` list, save, and reinstall.
+File manager location: `%USERPROFILE%\.dsh\profiles\desktop\pnpm-workspace.yaml`; add the package names given in the error to the `allowBuilds` list, save, and reinstall. When installing from the DSH plugin page, just click "allow these scripts and retry" instead of editing the file.
+
+**pnpm says the version is too new** (`minimumReleaseAge` supply-chain policy)
+
+Versions published less than 24 hours ago are not installed automatically. Add `minimumReleaseAgeExclude: [dsh-capability-manager@<version>]` to the same `pnpm-workspace.yaml`, or append `--config.minimumReleaseAge=0` to the install command.
 
 ### Uninstall
 

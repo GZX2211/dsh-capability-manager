@@ -123,7 +123,7 @@ Skill = 官方 Skill + 自建 Skill
 
 我们提供了一个聚合包，包含以下所有功能：
 - `dsh-capability-manager`（能力管理器）
-- `dsh-personal-agent`（个人助手）
+- `dsh-gzx-agent`（个人助手）
 - `dsh-run-python`（Python 工作台）
 
 在终端执行以下命令，即可一次性安装并配置所有插件：
@@ -149,7 +149,7 @@ dsh plugin add dsh-capability-manager
 
 [个人助手](https://github.com/GZX2211/dsh-personal-agent "如果你需要一个能自己“主动”干活的助手，不妨了解一下（通常与另两个插件搭配使用，否则会缺失部分能力）")
 ```bash
-dsh plugin add dsh-personal-agent
+dsh plugin add dsh-gzx-agent
 ```
 
 [python 工作台](https://github.com/GZX2211/dsh-run-python "如果你需要一个能直接执行 Python 代码并逐 cell 维持内核状态的工具，不妨了解一下")
@@ -161,7 +161,11 @@ dsh plugin add dsh-run-python
 
 **pnpm 拦截提示：声明了构建脚本，需要 `allowBuilds`**（常见）
 
-文件管理器定位：`%USERPROFILE%\.dsh\profiles\desktop\pnpm-workspace.yaml`，把报错中给出的包名添加到 `allowBuilds` 列表里，保存再重新安装。
+文件管理器定位：`%USERPROFILE%\.dsh\profiles\desktop\pnpm-workspace.yaml`，把报错中给出的包名添加到 `allowBuilds` 列表里，保存再重新安装。在 DSH 插件页安装时可直接点「允许这些脚本并重试」，无需手动编辑。
+
+**pnpm 提示版本太新（`minimumReleaseAge` 供应链策略）**
+
+发布未满 24 小时的版本不会被自动安装。可在同一份 `pnpm-workspace.yaml` 里加 `minimumReleaseAgeExclude: [dsh-capability-manager@<版本>]`，或在安装命令后加 `--config.minimumReleaseAge=0`。
 
 ### 卸载
 
