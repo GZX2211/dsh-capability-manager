@@ -22,7 +22,7 @@ export const META_SEARCH_DESCRIPTION = `召回当前会话可用的工具与 Ski
 
 参数：
 - names：准确名称或名称组（支持正则片段，如 "read|write|edit"），按名称匹配，永远可用，支持批量。只召回工具；Skill 名称不在这个通道里。
-- keywords：自然语言关键词，按语义相似度召回工具与 Skill，仅在开启向量检索时生效。
+- keywords：自然语言关键词或短语（2~4 词效果更好），按语义相似度召回工具与 Skill，仅在开启向量检索时生效。工具与 Skill 各自独立召回，互不影响条数。
 
 返回：tools 为可直接调用的完整 schema；skills 为索引条目（name + description），
 正文需再调用 skill 工具加载。返回为空表示这些能力已在当前上下文中，或不在能力池内。
@@ -41,8 +41,7 @@ export const META_SEARCH_PARAMETERS = {
   additionalProperties: false,
   properties: {
     names: { type: 'string', description: '名称组，支持 | 分隔的正则片段；只召回工具' },
-    keywords: { type: 'string', description: '自然语言关键词；开启向量检索时召回工具与 Skill' },
-    limit: { type: 'number', description: '最多返回条数，默认 20，上限 50' },
+    keywords: { type: 'string', description: '自然语言关键词或短语，2~4 词效果更好；开启向量检索时召回工具与 Skill' },
   },
 } as const
 
@@ -83,7 +82,7 @@ export interface MetaSearchDependencies {
  */
 export function parseMetaSearchArgs(rawArgs: unknown): MetaSearchRequest {
   if (typeof rawArgs !== 'object' || rawArgs === null || Array.isArray(rawArgs)) {
-    throw new Error('参数必须是一个对象，可包含 names、keywords、limit')
+    throw new Error('参数必须是一个对象，可包含 names、keywords')
   }
   const record = rawArgs as Record<string, unknown>
   const request: MetaSearchRequest = {}
@@ -94,12 +93,6 @@ export function parseMetaSearchArgs(rawArgs: unknown): MetaSearchRequest {
   if (record.keywords !== undefined) {
     if (typeof record.keywords !== 'string') throw new Error('keywords 必须是字符串')
     request.keywords = record.keywords
-  }
-  if (record.limit !== undefined) {
-    if (typeof record.limit !== 'number' || !Number.isFinite(record.limit)) {
-      throw new Error('limit 必须是数字')
-    }
-    request.limit = record.limit
   }
   return request
 }

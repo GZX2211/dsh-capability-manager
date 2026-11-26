@@ -16,7 +16,6 @@ import {
 } from '../shared/api.ts'
 import { parseId, skillId, type CapabilityEntry } from '../shared/capability.ts'
 import type { ToolSource } from './catalog/collect.ts'
-import { summarize } from './catalog/collect.ts'
 import { toolId } from '../shared/capability.ts'
 import { SKILL_TOOL_ID, type CapabilityConfig, type SessionRoleName } from '../shared/config.ts'
 import { applyPatch } from './admin/mutate.ts'
@@ -611,36 +610,40 @@ interface KeywordHitsInput {
 /**
  * 计算语义通道的名称命中。
  *
- * 只在模式 B 且真的给了 keywords 时计算：模式 A 下 keywords 由检索编排给出
- * 「未开启」的说明，这里返回 undefined 即可。
+ * 工具与 Skill 分池检索：两池各自调用一次 `search`，各按自己的 topK 截断，
+ * 互不占用名额。只在模式 B 且真的给了 keywords 时计算。
  *
  * @param input - 服务、配置、关键词与两侧候选。
- * @returns 工具与 Skill 的名称命中；不可用时为 `undefined`。
+ * @returns 工具与 Skill 的名称命中；任一侧不可用时为 `undefined`。
  */
 async function keywordHitsOf(input: KeywordHitsInput): Promise<KeywordHits | undefined> {
   const keywords = input.keywords?.trim() ?? ''
   if (keywords === '' || !input.config.embedding.enabled) return undefined
 
-  const candidates: EmbeddingCandidate[] = []
+  const toolCandidates: EmbeddingCandidate[] = []
   for (const [name, schema] of input.tools) {
-    candidates.push({ id: toolId(name), summary: summarize(schema.description) })
+    toolCandidates.push({ id: toolId(name), name, description: schema.description ?? '' })
   }
+  const skillCandidates: EmbeddingCandidate[] = []
   for (const [name, entry] of input.skills) {
-    candidates.push({ id: skillId(name), summary: entry.description })
+    skillCandidates.push({ id: skillId(name), name, description: entry.description })
   }
 
-  const hits = await input.embedding.search(keywords, candidates)
-  if (hits === undefined) return undefined
+  const [toolHits, skillHits] = await Promise.all([
+    input.embedding.search(keywords, toolCandidates),
+    input.embedding.search(keywords, skillCandidates),
+  ])
+  if (toolHits === undefined || skillHits === undefined) return undefined
 
-  const tools: string[] = []
-  const skills: string[] = []
-  for (const hit of hits) {
-    const parsed = parseId(hit.id)
-    if (parsed === undefined) continue
-    if (parsed.kind === 'tool') tools.push(parsed.name)
-    else skills.push(parsed.name)
+  const namesOf = (hits: typeof toolHits): string[] => {
+    const names: string[] = []
+    for (const hit of hits) {
+      const parsed = parseId(hit.id)
+      if (parsed !== undefined) names.push(parsed.name)
+    }
+    return names
   }
-  return { tools, skills }
+  return { tools: namesOf(toolHits), skills: namesOf(skillHits) }
 }
 
 /**

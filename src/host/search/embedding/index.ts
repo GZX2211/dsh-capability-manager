@@ -18,17 +18,33 @@ import { ensureModel, type EnsureModelOptions, type EnsureModelResult, type Mode
 import { loadEmbedder, type Embedder } from './runtime.ts'
 import { VectorStore } from './store.ts'
 
-/** 语义通道默认返回条数。 */
-export const DEFAULT_TOP_K = 10
+/** 每个候选池（工具 / Skill 各自）默认返回条数；两池合计最多 10 条。 */
+export const DEFAULT_TOP_K = 5
 
-/** 相似度阈值；低于它的命中会被丢弃，宁可少给也不给不相干的能力。 */
-export const DEFAULT_THRESHOLD = 0.35
+/**
+ * 相似度阈值；低于它的命中会被丢弃，宁可少给也不给不相干的能力。
+ *
+ * 中文 bge-small-zh 的余弦分布下 0.35 会把大量泛相关项塞满 topK，0.52 经多组实测
+ * 在保持召回的同时显著降噪；召不到的能力可以再次召回，漏召的代价低于噪声。
+ */
+export const DEFAULT_THRESHOLD = 0.52
 
 /** 参与语义检索的候选。 */
 export interface EmbeddingCandidate {
   id: CapabilityId
-  /** 生成向量的摘要：工具取 description 首行，Skill 取目录描述。 */
-  summary: string
+  /** 能力名称，参与向量化以免「定时」这类词落在描述之外时漏召回。 */
+  name: string
+  /** 完整描述，不截断。 */
+  description: string
+}
+
+/**
+ * 向量化正文：名称与描述直接相加，不截断。
+ *
+ * 名称与描述各占一行，避免两段文字粘连成一个词；模型看到的仍是完整字段。
+ */
+export function embeddingText(candidate: EmbeddingCandidate): string {
+  return `${candidate.name}\n${candidate.description}`
 }
 
 /** 一条语义命中。 */
@@ -253,18 +269,18 @@ export class EmbeddingService {
       const store = this.vectorStore()
       const missing: EmbeddingCandidate[] = []
       for (const candidate of candidates) {
-        const cached = store.get(candidate.id, candidate.summary)
+        const cached = store.get(candidate.id, embeddingText(candidate))
         if (cached === undefined) missing.push(candidate)
         else vectors.set(candidate.id, cached)
       }
 
       if (missing.length > 0) {
-        const computed = await embedder.embed(missing.map(candidate => candidate.summary))
+        const computed = await embedder.embed(missing.map(embeddingText))
         missing.forEach((candidate, index) => {
           const vector = computed[index]
           if (vector === undefined) return
           vectors.set(candidate.id, vector)
-          store.set(candidate.id, candidate.summary, vector)
+          store.set(candidate.id, embeddingText(candidate), vector)
         })
         store.flush()
       }

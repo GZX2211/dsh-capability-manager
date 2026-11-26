@@ -1,6 +1,7 @@
 // src/host/search/index.ts
 //
-// `meta_search` 的检索编排：名称通道 → 语义通道的预计算命中 → 载荷级去重 → 截断。
+// `meta_search` 的检索编排：名称通道 → 语义通道的预计算命中 → 载荷级去重。
+// 返回条数由上游决定：语义命中在 embedding 层按每池 topK 截断，这里不再做二次截断。
 //
 // 两条通道的范围刻意不同（用户确认的口径）：
 //   · names 只召回工具：Skill 名称不在精确名称通道里，避免与「目录已全量列出」
@@ -14,12 +15,7 @@ import { dedupeByPayload } from './dedupe.ts'
 import { compileNamePattern, matchNames } from './lexical.ts'
 import { skillPayload, toolPayload, type SkillPayloadSource, type ToolPayloadSource } from './payload.ts'
 
-/** 默认返回条数。 */
-const DEFAULT_LIMIT = 20
-/** 返回条数上限：一次召回太多会挤掉真正的工作上下文。 */
-const MAX_LIMIT = 50
-
-/** 语义通道的预计算命中；M5 接入向量检索后由调用方给出。 */
+/** 语义通道的预计算命中；由调用方按每池 topK 计算后给出。 */
 export interface KeywordHits {
   readonly tools: readonly string[]
   readonly skills: readonly string[]
@@ -47,8 +43,6 @@ export interface MetaSearchRequest {
   names?: string | undefined
   /** 自然语言关键词；仅在向量检索开启时生效。 */
   keywords?: string | undefined
-  /** 最多返回条数。 */
-  limit?: number | undefined
 }
 
 export interface MetaSearchOutcome {
@@ -78,7 +72,6 @@ export interface MetaSearchOutcome {
  */
 export function runMetaSearch(sources: MetaSearchSources, request: MetaSearchRequest): MetaSearchOutcome {
   const notes: string[] = []
-  const limit = clampLimit(request.limit)
   const names = request.names?.trim() ?? ''
   const keywords = request.keywords?.trim() ?? ''
 
@@ -116,10 +109,9 @@ export function runMetaSearch(sources: MetaSearchSources, request: MetaSearchReq
     }
   }
 
-  const tools = dedupeTools(sources, nameMatchedTools, keywordTools).slice(0, limit)
+  const tools = dedupeTools(sources, nameMatchedTools, keywordTools)
   const toolPayloads = tools.map(toolPayload)
-  // 名称通道命中优先，Skill 只吃剩余额度；一次召回里工具通常更急用。
-  const skills = dedupeSkills(sources, keywordSkills).slice(0, Math.max(0, limit - tools.length))
+  const skills = dedupeSkills(sources, keywordSkills)
   const skillPayloads = skills.map(skillPayload)
 
   if (skillNameHits > 0) {
@@ -173,17 +165,4 @@ function dedupeSkills(
     candidates.push(entry)
   }
   return dedupeByPayload(candidates, skillPayload, sources.seenSkills).kept
-}
-
-/**
- * 非法上限一律回落到默认值。
- *
- * 模型给 `limit: 0` 通常是想「不要结果」的笔误，真按 0 执行就等于什么都没召回；
- * 当作没给更接近它的意图。
- */
-function clampLimit(value: number | undefined): number {
-  if (value === undefined || !Number.isFinite(value)) return DEFAULT_LIMIT
-  const floored = Math.floor(value)
-  if (floored < 1) return DEFAULT_LIMIT
-  return Math.min(MAX_LIMIT, floored)
 }

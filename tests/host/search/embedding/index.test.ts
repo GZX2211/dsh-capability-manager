@@ -12,6 +12,7 @@ import {
   DEFAULT_THRESHOLD,
   DEFAULT_TOP_K,
   EmbeddingService,
+  embeddingText,
   selectTopK,
   type EmbeddingCandidate,
 } from '../../../../src/host/search/embedding/index.ts'
@@ -277,16 +278,16 @@ describe('状态机', () => {
 
 describe('语义检索', () => {
   const candidates: EmbeddingCandidate[] = [
-    { id: 'tool:read', summary: '读取文本文件' },
-    { id: 'skill:office', summary: '创建与编辑 Office 文档' },
-    { id: 'tool:bash', summary: '执行命令' },
+    { id: 'tool:read', name: 'read', description: '读取文本文件' },
+    { id: 'skill:office', name: 'office', description: '创建与编辑 Office 文档' },
+    { id: 'tool:bash', name: 'bash', description: '执行命令' },
   ]
 
   const table: Record<string, number[]> = {
     读取文件: [1, 0],
-    读取文本文件: [0.9, 0.4358898943540674],
-    '创建与编辑 Office 文档': [0.8, 0.6],
-    执行命令: [0, 1],
+    'read\n读取文本文件': [0.9, 0.4358898943540674],
+    'office\n创建与编辑 Office 文档': [0.8, 0.6],
+    'bash\n执行命令': [0, 1],
   }
 
   it('未开启时返回 undefined，由调用方给出说明', async () => {
@@ -309,7 +310,7 @@ describe('语义检索', () => {
     const { service } = harness({ table })
     await service.enable()
 
-    expect(await service.search('读取文件', [{ id: 'tool:bash', summary: '执行命令' }])).toEqual([])
+    expect(await service.search('读取文件', [{ id: 'tool:bash', name: 'bash', description: '执行命令' }])).toEqual([])
   })
 
   it('topK 截断结果', async () => {
@@ -336,9 +337,9 @@ describe('语义检索', () => {
     await service.search('读取文件', candidates)
     calls.length = 0
 
-    await service.search('读取文件', [{ id: 'tool:read', summary: '读取文本文件' }, { id: 'tool:bash', summary: '执行 shell 命令' }])
+    await service.search('读取文件', [{ id: 'tool:read', name: 'read', description: '读取文本文件' }, { id: 'tool:bash', name: 'bash', description: '执行 shell 命令' }])
 
-    expect(calls).toEqual(['读取文件', '执行 shell 命令'])
+    expect(calls).toEqual(['读取文件', 'bash\n执行 shell 命令'])
   })
 
   it('推理失败时降级为 undefined 而不是抛给工具层', async () => {
@@ -359,9 +360,19 @@ describe('语义检索', () => {
     const harnessed = harness({ table })
     await harnessed.service.enable()
 
-    await harnessed.service.search('读取文件', [{ id: 'tool:read', summary: '读取文本文件' }])
+    await harnessed.service.search('读取文件', [{ id: 'tool:read', name: 'read', description: '读取文本文件' }])
 
     expect(existsSync(harnessed.vectorPath)).toBe(true)
+  })
+})
+
+describe('向量化正文', () => {
+  it('名称与描述相加且不截断', () => {
+    const description = `第一行\n第二行关键词${'x'.repeat(500)}`
+    const text = embeddingText({ id: 'tool:schedule_create', name: 'schedule_create', description })
+
+    expect(text).toBe(`schedule_create\n${description}`)
+    expect(text).toContain('第二行关键词')
   })
 })
 
@@ -374,8 +385,8 @@ describe('topK 选择', () => {
   ]
 
   it('默认阈值与条数来自常量', () => {
-    expect(DEFAULT_TOP_K).toBe(10)
-    expect(DEFAULT_THRESHOLD).toBe(0.35)
+    expect(DEFAULT_TOP_K).toBe(5)
+    expect(DEFAULT_THRESHOLD).toBe(0.52)
   })
 
   it('过滤、排序、截断一次完成', () => {

@@ -226,59 +226,31 @@ describe('载荷级去重', () => {
   })
 })
 
-describe('条数上限', () => {
-  it('默认最多 20 条', () => {
-    const names = Array.from({ length: 30 }, (_, index) => `tool${String(index).padStart(2, '0')}`)
-    const outcome = runMetaSearch(sources({ tools: names }), { names: 'tool' })
-
-    expect(outcome.tools).toHaveLength(20)
-  })
-
-  it('上限是 50 条', () => {
-    const names = Array.from({ length: 80 }, (_, index) => `tool${String(index).padStart(2, '0')}`)
-    const outcome = runMetaSearch(sources({ tools: names }), { names: 'tool', limit: 999 })
-
-    expect(outcome.tools).toHaveLength(50)
-  })
-
-  it('请求更少条数时按请求截断', () => {
-    const outcome = runMetaSearch(sources({ tools: ['read', 'write', 'edit'] }), {
-      names: 'read|write|edit',
-      limit: 2,
-    })
-
-    expect(outcome.toolNames).toEqual(['read', 'write'])
-  })
-
-  it('非正数与非法数字回落到默认值', () => {
-    const names = Array.from({ length: 25 }, (_, index) => `tool${String(index).padStart(2, '0')}`)
-
-    expect(runMetaSearch(sources({ tools: names }), { names: 'tool', limit: 0 }).tools).toHaveLength(20)
-    expect(runMetaSearch(sources({ tools: names }), { names: 'tool', limit: Number.NaN }).tools).toHaveLength(20)
-  })
-
-  it('工具优先占用额度，Skill 只吃剩余条数', () => {
+describe('工具与 Skill 分池', () => {
+  it('两池的语义命中互不占用额度', () => {
+    const tools = Array.from({ length: 8 }, (_, index) => `tool${index}`)
+    const skills = Array.from({ length: 8 }, (_, index) => `skill${index}`)
     const outcome = runMetaSearch(
       sources({
         embeddingEnabled: true,
-        tools: ['a', 'b', 'c'],
-        skills: ['s1', 's2'],
-        keywordHits: { tools: ['a', 'b', 'c'], skills: ['s1', 's2'] },
+        tools,
+        skills,
+        keywordHits: { tools, skills },
       }),
-      { keywords: '查询', limit: 4 },
+      { keywords: '查询' },
     )
 
-    expect(outcome.toolNames).toHaveLength(3)
-    expect(outcome.skills).toHaveLength(1)
+    expect(outcome.toolNames).toHaveLength(8)
+    expect(outcome.skills).toHaveLength(8)
   })
 
-  it('载荷与名称同步截断，长度一致', () => {
+  it('载荷与名称一一对应，长度一致', () => {
     const names = Array.from({ length: 5 }, (_, index) => `tool${String(index)}`)
-    const outcome = runMetaSearch(sources({ tools: names }), { names: 'tool', limit: 3 })
+    const outcome = runMetaSearch(sources({ tools: names }), { names: 'tool' })
 
-    expect(outcome.toolNames).toHaveLength(3)
-    expect(outcome.toolPayloads).toHaveLength(3)
-    expect(outcome.tools).toHaveLength(3)
+    expect(outcome.toolNames).toHaveLength(5)
+    expect(outcome.toolPayloads).toHaveLength(5)
+    expect(outcome.tools).toHaveLength(5)
   })
 })
 

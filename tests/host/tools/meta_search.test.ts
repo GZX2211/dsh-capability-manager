@@ -51,11 +51,10 @@ describe('参数校验', () => {
     expect(parseMetaSearchArgs({})).toEqual({})
   })
 
-  it('接受三个字段的合法组合', () => {
-    expect(parseMetaSearchArgs({ names: 'read', keywords: '读取', limit: 5 })).toEqual({
+  it('接受 names 与 keywords 的合法组合', () => {
+    expect(parseMetaSearchArgs({ names: 'read', keywords: '读取' })).toEqual({
       names: 'read',
       keywords: '读取',
-      limit: 5,
     })
   })
 
@@ -71,15 +70,6 @@ describe('参数校验', () => {
 
   it('keywords 必须是字符串', () => {
     expect(() => parseMetaSearchArgs({ keywords: true })).toThrow(/keywords/)
-  })
-
-  it('limit 必须是数字', () => {
-    expect(() => parseMetaSearchArgs({ limit: '5' })).toThrow(/limit/)
-  })
-
-  it('limit 非有限数时拒绝', () => {
-    expect(() => parseMetaSearchArgs({ limit: Number.NaN })).toThrow(/limit/)
-    expect(() => parseMetaSearchArgs({ limit: Number.POSITIVE_INFINITY })).toThrow(/limit/)
   })
 
   it('忽略不认识的字段', () => {
