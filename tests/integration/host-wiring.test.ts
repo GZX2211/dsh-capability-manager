@@ -686,13 +686,14 @@ describe('向量检索', () => {
     expect(snapshot.embedding).toMatchObject({ enabled: true, status: 'ready' })
   })
 
-  it('开启后进入模式 B：目录不注入、索引为空', async () => {
+  it('开启后进入模式 B：无常驻 Skill 时目录为空、工具索引为空', async () => {
     const host = createHost({ embedding: fakeEmbedding('alpha') })
     await host.createAgent()
     await host.request('POST', ENABLE_EMBEDDING)
 
     const decision = await host.preStep() as { messages: { source?: { kind?: string } }[] }
 
+    // 没有常驻 Skill，模式 B 的目录为空，首版空目录不注入。
     expect(decision.messages.filter(message => message.source?.kind === CATALOG_SOURCE_KIND)).toHaveLength(0)
     expect(host.indexText()).toBe('')
   })
@@ -766,6 +767,109 @@ describe('向量检索', () => {
     expect(response.status).toBe(502)
     expect(response.body).toMatchObject({ ok: false, code: 'embedding-download-failed' })
     expect((await host.snapshot()).embedding).toMatchObject({ enabled: false, status: 'failed' })
+  })
+
+  const TWO_SKILLS = [
+    { name: 'resident-skill', description: '常驻技能说明' },
+    { name: 'on-demand-skill', description: '按需技能说明' },
+  ]
+
+  it('模式 B：目录只注入常驻 Skill 的 name+description，非常驻不注入', async () => {
+    const host = createHost({
+      skills: TWO_SKILLS,
+      config: { ...DEFAULT_CONFIG, resident: ['tool:meta_search', 'tool:skill', 'skill:resident-skill'] },
+      embedding: fakeEmbedding('alpha'),
+    })
+    await host.createAgent()
+    await host.request('POST', ENABLE_EMBEDDING)
+
+    const decision = await host.preStep() as { messages: { source?: { kind?: string }; content?: { text: string }[] }[] }
+    const catalog = decision.messages.find(message => message.source?.kind === CATALOG_SOURCE_KIND)
+
+    expect(catalog).toBeDefined()
+    expect(catalog?.content?.[0]?.text).toContain('- `resident-skill`：常驻技能说明')
+    expect(catalog?.content?.[0]?.text).not.toContain('on-demand-skill')
+  })
+
+  it('模式 B：常驻 Skill 不参与 keywords 召回，非常驻仍可召回', async () => {
+    const host = createHost({
+      skills: TWO_SKILLS,
+      config: { ...DEFAULT_CONFIG, resident: ['tool:meta_search', 'tool:skill', 'skill:resident-skill'] },
+      embedding: fakeEmbedding('按需'),
+    })
+    await host.createAgent()
+    await host.request('POST', ENABLE_EMBEDDING)
+    const metaSearch = host.globalTools.find(tool => tool.name === 'meta_search')
+    if (metaSearch === undefined) throw new Error('meta_search not registered')
+
+    const value = await metaSearch.execute(
+      { keywords: '按需' },
+      { agent: host.agent as never, signal: new AbortController().signal } as never,
+    ) as { skills: { name: string }[] }
+
+    expect(value.skills.map(skill => skill.name)).not.toContain('resident-skill')
+  })
+
+  it('模式 B：会话中途把 Skill 设为常驻，下一轮注入目录且不再召回', async () => {
+    const host = createHost({
+      skills: TWO_SKILLS,
+      config: { ...DEFAULT_CONFIG, resident: ['tool:meta_search', 'tool:skill'] },
+      embedding: fakeEmbedding('alpha'),
+    })
+    await host.createAgent()
+    await host.request('POST', ENABLE_EMBEDDING)
+
+    const beforeResult = await host.request('GET', '/capability-manager/api/snapshot') as { body: { revision: number } }
+    const configResponse = await host.request('POST', '/capability-manager/api/config', {
+      revision: beforeResult.body.revision,
+      op: 'set-resident', id: 'skill:resident-skill', value: true,
+    })
+    expect(configResponse.status).toBe(200)
+
+    const decision = await host.preStep() as { messages: { source?: { kind?: string }; content?: { text: string }[] }[] }
+    const catalog = decision.messages.find(message => message.source?.kind === CATALOG_SOURCE_KIND)
+
+    expect(catalog?.content?.[0]?.text).toContain('- `resident-skill`：常驻技能说明')
+    expect(catalog?.content?.[0]?.text).not.toContain('on-demand-skill')
+  })
+
+  it('从模式 A 切到模式 B：无常驻时发布空目录退役旧名称', async () => {
+    const host = createHost({
+      skills: TWO_SKILLS,
+      embedding: fakeEmbedding('alpha'),
+    })
+    await host.createAgent()
+
+    const first = await host.preStep() as { messages: { source?: { kind?: string } }[] }
+    for (const message of first.messages) host.history.push(message)
+
+    await host.request('POST', ENABLE_EMBEDDING)
+    const decision = await host.preStep() as { messages: { source?: { kind?: string }; content?: { text: string }[] }[] }
+    const catalog = decision.messages.find(message => message.source?.kind === CATALOG_SOURCE_KIND)
+
+    expect(catalog).toBeDefined()
+    expect(catalog?.content?.[0]?.text).toContain('当前没有可用的 Skill')
+    expect(catalog?.content?.[0]?.text).toContain('不要使用更早清单里的名称')
+  })
+
+  it('模式 B：常驻 Skill 被该角色拉黑时既不注入也不可召回', async () => {
+    const host = createHost({
+      skills: TWO_SKILLS,
+      config: {
+        ...DEFAULT_CONFIG,
+        resident: ['tool:meta_search', 'tool:skill', 'skill:resident-skill'],
+        blacklist: { router: ['skill:resident-skill'], worker: [] },
+      },
+      embedding: fakeEmbedding('alpha'),
+      roles: () => 'router',
+    })
+    await host.createAgent()
+    await host.request('POST', ENABLE_EMBEDDING)
+
+    const decision = await host.preStep() as { messages: { source?: { kind?: string }; content?: { text: string }[] }[] }
+    const catalog = decision.messages.find(message => message.source?.kind === CATALOG_SOURCE_KIND)
+
+    expect(catalog?.content?.[0]?.text ?? '').not.toContain('resident-skill')
   })
 })
 

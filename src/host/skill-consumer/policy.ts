@@ -10,6 +10,9 @@ import { parseId, type CapabilityId } from '../../shared/capability.ts'
 import { META_SEARCH_TOOL_ID, SKILL_TOOL_ID, type CapabilityConfig, type SessionRoleName } from '../../shared/config.ts'
 import { blacklistFor, isInPool, isToolUsable } from '../policy/pool.ts'
 
+/** 目录注入范围：全量池内，或仅常驻。 */
+export type CatalogScope = 'all' | 'resident'
+
 /** 官方与 shadow 共用的工具名；同名是 shadow 生效的前提。 */
 export const SKILL_TOOL_NAME = 'skill'
 
@@ -65,23 +68,37 @@ export interface CatalogInjectionInput {
 /**
  * Skill 目录是否注入。
  *
- * 语义检索开启且 `meta_search` 可用时，Skill 与工具一样靠关键词召回，
- * 目录只会重复占用上下文；其余情形（含 `meta_search` 不可用）都必须注入，
- * 否则模型无从知道 Skill 名称，也无法用 `skill` 工具加载。
+ * 任何情形都要注入：模式 A 注入全量池内 Skill；模式 B 注入常驻 Skill（非常驻
+ * 靠关键词召回）。`meta_search` 不可用时同样注入全量，否则模型无从知道名称。
+ * 目录始终是 name + description，不含正文——正文仍由 `skill` 工具按需加载。
  *
- * @param input - `meta_search` 可用性与向量检索开关。
- * @returns 需要注入目录时为 true。
+ * @returns 恒为 true；保留函数是为了让「是否注入」与「注入范围」各有单一判定处。
  */
-export function isCatalogInjected(input: CatalogInjectionInput): boolean {
-  return !(input.metaSearchUsable && input.embeddingEnabled)
+export function isCatalogInjected(_input: CatalogInjectionInput): boolean {
+  return true
+}
+
+/**
+ * 目录注入范围。
+ *
+ * 模式 A 或没有召回通道时给全量；模式 B 且 `meta_search` 可用时只给常驻——
+ * 非常驻 Skill 走 `meta_search` 的 keywords 语义召回。
+ *
+ * @param config - 当前配置（读 embedding 开关）。
+ * @param metaSearchUsable - `meta_search` 此刻是否可用。
+ * @returns 注入范围。
+ */
+export function catalogScopeOf(config: CapabilityConfig, metaSearchUsable: boolean): CatalogScope {
+  if (!config.embedding.enabled) return 'all'
+  if (!metaSearchUsable) return 'all'
+  return 'resident'
 }
 
 /**
  * 当前会话此刻是否应注入 Skill 目录。
  *
- * 把「meta_search 是否可用」也收进来，是因为注入时机必须按会话判定而不能只看
- * 全局配置：`meta_search` 可能被池/黑名单/常驻排除，但 Skill 目录仍必须存在，
- * 否则模型既看不到名称、也没有入口召回。
+ * 注入时机按会话判定：`skill` 入口工具必须可用（池内、非黑名单、常驻或已召回），
+ * 否则模型看得到目录也没法加载正文。目录范围由 {@link catalogScopeOf} 另行决定。
  *
  * @param input - 配置、角色与召回集合。
  * @returns 应注入时为 true。

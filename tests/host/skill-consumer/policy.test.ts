@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  catalogScopeOf,
   isCatalogInjected,
   isSkillEnabled,
   isSkillToolUsable,
@@ -77,16 +78,26 @@ describe('Skill 能力池归属', () => {
 })
 
 describe('Skill 目录注入时机', () => {
-  it('语义检索开启且 meta_search 可用时不注入：改用关键词召回 Skill', () => {
-    expect(isCatalogInjected({ metaSearchUsable: true, embeddingEnabled: true })).toBe(false)
-  })
-  it('语义检索关闭且 meta_search 可用时注入：Skill 不参与召回', () => {
+  it('任何组合都注入目录：模式 A 全量、模式 B 常驻、降级全量', () => {
+    expect(isCatalogInjected({ metaSearchUsable: true, embeddingEnabled: true })).toBe(true)
     expect(isCatalogInjected({ metaSearchUsable: true, embeddingEnabled: false })).toBe(true)
-  })
-
-  it('meta_search 不可用时注入：Skill 不能依赖召回', () => {
     expect(isCatalogInjected({ metaSearchUsable: false, embeddingEnabled: false })).toBe(true)
     expect(isCatalogInjected({ metaSearchUsable: false, embeddingEnabled: true })).toBe(true)
+  })
+})
+
+describe('Skill 目录注入范围', () => {
+  it('模式 A 注入全量池内 Skill', () => {
+    expect(catalogScopeOf(config({}), true)).toBe('all')
+    expect(catalogScopeOf(config({}), false)).toBe('all')
+  })
+
+  it('模式 B 且 meta_search 可用时只注入常驻', () => {
+    expect(catalogScopeOf(config({ embedding: { enabled: true } }), true)).toBe('resident')
+  })
+
+  it('模式 B 但 meta_search 不可用时降级为全量', () => {
+    expect(catalogScopeOf(config({ embedding: { enabled: true } }), false)).toBe('all')
   })
 })
 
@@ -107,8 +118,8 @@ describe('按会话判定目录注入', () => {
     expect(inject({})).toBe(true)
   })
 
-  it('语义检索开启且 meta_search 常驻时不注入', () => {
-    expect(inject({ resident: ['tool:meta_search', 'tool:skill'], embedding: { enabled: true } })).toBe(false)
+  it('语义检索开启且 meta_search 常驻时仍注入（目录只含常驻 Skill）', () => {
+    expect(inject({ resident: ['tool:meta_search', 'tool:skill'], embedding: { enabled: true } })).toBe(true)
   })
 
   it('meta_search 被排除出池时仍注入', () => {

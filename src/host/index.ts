@@ -17,7 +17,7 @@ import {
 import { parseId, skillId, type CapabilityEntry } from '../shared/capability.ts'
 import type { ToolSource } from './catalog/collect.ts'
 import { toolId } from '../shared/capability.ts'
-import { SKILL_TOOL_ID, type CapabilityConfig, type SessionRoleName } from '../shared/config.ts'
+import { META_SEARCH_TOOL_ID, SKILL_TOOL_ID, type CapabilityConfig, type SessionRoleName } from '../shared/config.ts'
 import { applyPatch } from './admin/mutate.ts'
 import { createSkillAction, revealAction } from './admin/selfmade.ts'
 import { createAdminHandler, type ConfigOutcome } from './admin/server.ts'
@@ -30,6 +30,7 @@ import { classifySource } from './catalog/source.ts'
 import { ConfigStore } from './config/store.ts'
 import type { HostContext } from './context.ts'
 import { readMcpServers, writeMcpServers } from './mcp/bridge.ts'
+import { isToolUsable, residentSet, skillNames } from './policy/pool.ts'
 import { EnforcementRegistry, type AgentScope } from './enforcement/registry.ts'
 import { RecalledStore, type SessionLike } from './enforcement/recalled.ts'
 import { renderIndex, selectToolIndex, shouldInjectIndex } from './prompt/index-section.ts'
@@ -43,7 +44,7 @@ import { SelfmadeSkills } from './selfmade/skills.ts'
 import { SelfmadeTools } from './selfmade/tools.ts'
 import { catalogEntries } from './skill-consumer/catalog.ts'
 import { createCatalogListener, type CatalogPlan } from './skill-consumer/catalog-inject.ts'
-import { isSkillToolUsable, shouldInjectSkillCatalog } from './skill-consumer/policy.ts'
+import { catalogScopeOf, isSkillToolUsable, shouldInjectSkillCatalog } from './skill-consumer/policy.ts'
 import {
   allSkillSummaries,
   eligibleSkills,
@@ -175,8 +176,13 @@ export function apply(ctx: HostContext, config?: Config): void {
       const entries = catalogEntries(skills)
       // 名称 → 目录条目；召回与语义通道共用同一份，避免两者对「有哪些 Skill」理解不一致。
       const skillEntries = new Map(entries.map(entry => [entry.name, entry]))
-      // 模式 A 且目录已注入时，整份 Skill 列表都已出现在上下文中，Skill 召回必然为空。
+      // 模式 A 且目录已注入：整份 Skill 列表都在上下文，Skill 召回为空。
+      // 模式 B：只有常驻 Skill 在上下文，非常驻走关键词召回。
       const catalogResident = skillUsable && !context.config.embedding.enabled
+      const residentNames = residentSkillNames(context.config)
+      const residentPayloads = [...residentNames]
+        .filter(name => skillEntries.has(name))
+        .map(name => skillPayload(skillEntries.get(name)!))
       const tools = buildToolCandidates({
         schemas: enforcement.schemasOf(),
         present: enforcement.presentOf(sessionId),
@@ -190,6 +196,8 @@ export function apply(ctx: HostContext, config?: Config): void {
         keywords: request.keywords,
         tools,
         skills: skillEntries,
+        // 模式 B 排除常驻：它们已在上下文，召回只会白占 topK 名额。
+        excludeSkillNames: catalogResident ? new Set() : residentNames,
       })
       return {
         tools,
@@ -197,7 +205,7 @@ export function apply(ctx: HostContext, config?: Config): void {
         seenTools: toolPayloadsOf(visibleToolsOf(agent, log)),
         seenSkills: catalogResident
           ? new Set(entries.map(skillPayload))
-          : recalled.skillPayloadsOf(sessionId),
+          : new Set([...recalled.skillPayloadsOf(sessionId), ...residentPayloads]),
         embeddingEnabled: context.config.embedding.enabled,
         skillCatalogResident: catalogResident,
         keywordHits,
@@ -276,13 +284,25 @@ export function apply(ctx: HostContext, config?: Config): void {
               const context = skillContextOf(agent)
               if (!shouldInjectSkillCatalog(context)) return { active: false }
               if (!isSkillToolUsable(context)) return { active: true, entries: [] }
+              const metaSearchUsable = isToolUsable({
+                id: META_SEARCH_TOOL_ID,
+                config: context.config,
+                role: context.role,
+                recalled: context.recalled,
+              })
               const skills = await eligibleSkills(skillQuery, {
                 agent,
                 config: context.config,
                 role: context.role,
                 signal,
               })
-              return { active: true, entries: catalogEntries(skills) }
+              // 模式 B 且 meta_search 可用时只注入常驻 Skill；非常驻靠 keywords 召回。
+              const scope = catalogScopeOf(context.config, metaSearchUsable)
+              const residents = scope === 'resident' ? residentSkillNames(context.config) : undefined
+              const selected = residents === undefined
+                ? skills
+                : skills.filter(skill => residents.has(skill.name))
+              return { active: true, entries: catalogEntries(selected) }
             },
             log,
           }),
@@ -598,6 +618,15 @@ function summariesOf(capabilities: readonly CapabilityEntry[]): Map<string, stri
   return new Map(capabilities.filter(entry => entry.kind === 'tool').map(entry => [entry.name, entry.summary]))
 }
 
+/**
+ * 当前配置为常驻的 Skill 名称；目录注入与召回排除共用同一份判定。
+ *
+ * 只回答「配置是否标为常驻」；池内与黑名单由调用方的候选集负责。
+ */
+function residentSkillNames(config: CapabilityConfig): Set<string> {
+  return skillNames(residentSet(config))
+}
+
 /** 语义通道的输入：服务、配置、关键词与两侧候选。 */
 interface KeywordHitsInput {
   embedding: EmbeddingService
@@ -605,6 +634,8 @@ interface KeywordHitsInput {
   keywords: string | undefined
   tools: ReadonlyMap<string, ToolPayloadSource>
   skills: ReadonlyMap<string, SkillPayloadSource>
+  /** 不参与 Skill 语义召回的名称（模式 B 下的常驻 Skill）。 */
+  excludeSkillNames: ReadonlySet<string>
 }
 
 /**
@@ -626,6 +657,7 @@ async function keywordHitsOf(input: KeywordHitsInput): Promise<KeywordHits | und
   }
   const skillCandidates: EmbeddingCandidate[] = []
   for (const [name, entry] of input.skills) {
+    if (input.excludeSkillNames.has(name)) continue
     skillCandidates.push({ id: skillId(name), name, description: entry.description })
   }
 
