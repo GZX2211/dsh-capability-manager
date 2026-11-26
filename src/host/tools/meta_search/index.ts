@@ -121,7 +121,7 @@ export function renderMetaSearch(_args: unknown, value: unknown): { type: 'text'
   }
 
   if (tools.length === 0 && skills.length === 0) {
-    lines.push('没有新的能力可返回。目标能力可能已在当前上下文中，或不在能力池内。')
+    lines.push('没有新的能力可召回，目标能力可能已在当前上下文中，或不存在该能力。')
   }
 
   for (const note of notes) lines.push('', `> ${note}`)
